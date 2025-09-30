@@ -1,0 +1,156 @@
+# Docker Compose for E-Commerce Microservices Demo
+version: '3.8'
+services:
+
+  api-gateway:
+    build: ./api-gateway
+    ports:
+      - "8080:8080"
+    depends_on:
+      - auth-service
+      - product-service
+      - cart-service
+      - order-service
+      - payment-service
+      - inventory-service
+      - recommendation-service
+      - analytics-service
+    networks:
+      - ecommerce-net
+
+  auth-service:
+    build: ./auth-service
+    environment:
+      - MONGO_URI=mongodb://mongo-auth:27017/auth
+    depends_on:
+      - mongo-auth
+    networks:
+      - ecommerce-net
+
+  product-service:
+    build: ./product-service
+    environment:
+      - MONGO_URI=mongodb://mongo-product:27017/products
+    depends_on:
+      - mongo-product
+    networks:
+      - ecommerce-net
+
+  cart-service:
+    build: ./cart-service
+    environment:
+      - MONGO_URI=mongodb://mongo-cart:27017/cart
+    depends_on:
+      - mongo-cart
+    networks:
+      - ecommerce-net
+
+  order-service:
+    build: ./order-service
+    environment:
+      - POSTGRES_URI=postgres://postgres:password@postgres-orders:5432/orders
+    depends_on:
+      - postgres-orders
+    networks:
+      - ecommerce-net
+
+  payment-service:
+    build: ./payment-service
+    networks:
+      - ecommerce-net
+
+  inventory-service:
+    build: ./inventory-service
+    environment:
+      - MONGO_URI=mongodb://mongo-inventory:27017/inventory
+    depends_on:
+      - mongo-inventory
+    networks:
+      - ecommerce-net
+
+  recommendation-service:
+    build: ./recommendation-service
+    networks:
+      - ecommerce-net
+
+  analytics-service:
+    build: ./analytics-service
+    environment:
+      - MONGO_URI=mongodb://mongo-analytics:27017/analytics
+    depends_on:
+      - mongo-analytics
+    networks:
+      - ecommerce-net
+
+  message-broker:
+    build: ./message-broker
+    environment:
+      - NATS_URL=nats://nats:4222
+    depends_on:
+      - nats
+    networks:
+      - ecommerce-net
+
+  frontend:
+    build: ./frontend
+    ports:
+      - "3000:3000"
+    networks:
+      - ecommerce-net
+
+  mongo-auth:
+    image: mongo:6.0
+    ports:
+      - "27017"
+    networks:
+      - ecommerce-net
+
+  mongo-product:
+    image: mongo:6.0
+    ports:
+      - "27018:27017"
+    networks:
+      - ecommerce-net
+
+  mongo-cart:
+    image: mongo:6.0
+    ports:
+      - "27019:27017"
+    networks:
+      - ecommerce-net
+
+  mongo-inventory:
+    image: mongo:6.0
+    ports:
+      - "27020:27017"
+    networks:
+      - ecommerce-net
+
+  mongo-analytics:
+    image: mongo:6.0
+    ports:
+      - "27021:27017"
+    networks:
+      - ecommerce-net
+
+  postgres-orders:
+    image: postgres:15
+    environment:
+      POSTGRES_DB: orders
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: password
+    ports:
+      - "5432:5432"
+    networks:
+      - ecommerce-net
+
+  nats:
+    image: nats:2.10.0
+    ports:
+      - "4222:4222"
+    networks:
+      - ecommerce-net
+
+networks:
+  ecommerce-net:
+    driver: bridge
