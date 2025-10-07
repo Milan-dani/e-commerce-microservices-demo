@@ -1,3 +1,4 @@
+require('dotenv').config();
 const express = require('express');
 const mongoose = require('mongoose');
 const jwt = require('jsonwebtoken');
@@ -12,6 +13,8 @@ const MONGO_URI = process.env.MONGO_URI || 'mongodb://localhost:27017/auth';
 
 // User schema
 const userSchema = new mongoose.Schema({
+  firstName: {type: String, required: true},
+  lastName: {type: String, required: true},
   username: { type: String, required: true, unique: true },
   email: { type: String, required: true, unique: true },
   password: { type: String, required: true },
@@ -21,14 +24,25 @@ const User = mongoose.model('User', userSchema);
 
 // Signup
 app.post('/signup', async (req, res) => {
-  const { username, email, password, role } = req.body;
+  const {firstName, lastName, username, email, password, role } = req.body;
   const hash = await bcrypt.hash(password, 10);
   try {
-    const user = await User.create({ username, email, password: hash, role });
-    res.status(201).json({ message: 'User created', user: { username, email, role } });
+    const user = await User.create({ firstName, lastName, username, email, password: hash, role });
+    // Create a JWT token
+    const token = jwt.sign(
+      { id: user._id, role: user.role },
+      JWT_SECRET,
+      { expiresIn: '1h' }
+    );
+    res.status(201).json({ message: 'User created', user: { firstName, lastName, username, email, role }, token });
   } catch (err) {
     res.status(400).json({ error: err.message });
   }
+});
+
+// test
+app.post('/', async (req, res) => {
+  res.send("Auth Service is running");
 });
 
 // Login

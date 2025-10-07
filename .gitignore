@@ -21,6 +21,8 @@ Thumbs.db
 .env.development.local
 .env.test.local
 .env.production.local
+# Don't ignore Env example
+!.env.example
 
 # Docker
 *.pid
@@ -55,3 +57,6 @@ frontend/node_modules/
 **/.DS_Store
 **/coverage/
 **/logs/
+
+# ignore connections/service testing module
+test-service/
