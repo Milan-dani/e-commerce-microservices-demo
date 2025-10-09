@@ -60,3 +60,6 @@ frontend/node_modules/
 
 # ignore connections/service testing module
 test-service/
+
+# ignore resources folders
+uploads/
