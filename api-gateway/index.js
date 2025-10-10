@@ -2,7 +2,8 @@ require('dotenv').config();
 const express = require("express");
 const cors = require("cors");
 const jwt = require("jsonwebtoken");
-const { createProxyMiddleware } = require("http-proxy-middleware");
+const { proxyToService } = require('./serviceRegistory');
+const { createProxyMiddleware } = require('http-proxy-middleware');
 
 const app = express();
 const PORT = process.env.PORT || 8080;
@@ -37,84 +38,98 @@ function authenticateJWT(req, res, next) {
 
 app.use(cors());
 
-// Proxy routes
-app.use(
-  "/auth",
-  createProxyMiddleware({
-    target: SERVICES.AUTH,
-    changeOrigin: true,
-    pathRewrite: { "^/auth": "" },
-  })
-);
 
-app.use(
-  "/products",
-  createProxyMiddleware({
-    target: SERVICES.PRODUCTS,
-    changeOrigin: true,
-    pathRewrite: { "^/products": "" },
-  })
-);
+// proxy Route with service Registory /dynamic URLs
 
-app.use(
-  "/cart",
-  authenticateJWT,
-  createProxyMiddleware({
-    target: SERVICES.CART,
-    changeOrigin: true,
-    pathRewrite: { "^/cart": "" },
-  })
-);
+app.use("/auth", proxyToService("auth"));
+app.use("/products", proxyToService("products"));
+app.use("/cart", proxyToService("cart"));
+app.use("/orders", proxyToService("orders"));
+app.use("/payments", proxyToService("payments"));
+app.use("/inventory", proxyToService("inventory"));
+app.use("/recommendations", proxyToService("recommendations"));
+app.use("/analytics", proxyToService("analytics"));
+// app.use("/auth", proxyToService("auth"));
 
-app.use(
-  "/orders",
-  authenticateJWT,
-  createProxyMiddleware({
-    target: SERVICES.ORDERS,
-    changeOrigin: true,
-    pathRewrite: { "^/orders": "" },
-  })
-);
 
-app.use(
-  "/payments",
-  authenticateJWT,
-  createProxyMiddleware({
-    target: SERVICES.PAYMENTS,
-    changeOrigin: true,
-    pathRewrite: { "^/payments": "" },
-  })
-);
+// // Proxy routes
+// app.use(
+//   "/auth",
+//   createProxyMiddleware({
+//     target: SERVICES.AUTH,
+//     changeOrigin: true,
+//     pathRewrite: { "^/auth": "" },
+//   })
+// );
 
-app.use(
-  "/inventory",
-  authenticateJWT,
-  createProxyMiddleware({
-    target: SERVICES.INVENTORY,
-    changeOrigin: true,
-    pathRewrite: { "^/inventory": "" },
-  })
-);
+// app.use(
+//   "/products",
+//   createProxyMiddleware({
+//     target: SERVICES.PRODUCTS,
+//     changeOrigin: true,
+//     pathRewrite: { "^/products": "" },
+//   })
+// );
 
-app.use(
-  "/recommendations",
-  authenticateJWT,
-  createProxyMiddleware({
-    target: SERVICES.RECOMMENDATIONS,
-    changeOrigin: true,
-    pathRewrite: { "^/recommendations": "" },
-  })
-);
+// app.use(
+//   "/cart",
+//   authenticateJWT,
+//   createProxyMiddleware({
+//     target: SERVICES.CART,
+//     changeOrigin: true,
+//     pathRewrite: { "^/cart": "" },
+//   })
+// );
 
-app.use(
-  "/analytics",
-  authenticateJWT,
-  createProxyMiddleware({
-    target: SERVICES.ANALYTICS,
-    changeOrigin: true,
-    pathRewrite: { "^/analytics": "" },
-  })
-);
+// app.use(
+//   "/orders",
+//   authenticateJWT,
+//   createProxyMiddleware({
+//     target: SERVICES.ORDERS,
+//     changeOrigin: true,
+//     pathRewrite: { "^/orders": "" },
+//   })
+// );
+
+// app.use(
+//   "/payments",
+//   authenticateJWT,
+//   createProxyMiddleware({
+//     target: SERVICES.PAYMENTS,
+//     changeOrigin: true,
+//     pathRewrite: { "^/payments": "" },
+//   })
+// );
+
+// app.use(
+//   "/inventory",
+//   authenticateJWT,
+//   createProxyMiddleware({
+//     target: SERVICES.INVENTORY,
+//     changeOrigin: true,
+//     pathRewrite: { "^/inventory": "" },
+//   })
+// );
+
+// app.use(
+//   "/recommendations",
+//   authenticateJWT,
+//   createProxyMiddleware({
+//     target: SERVICES.RECOMMENDATIONS,
+//     changeOrigin: true,
+//     pathRewrite: { "^/recommendations": "" },
+//   })
+// );
+
+// app.use(
+//   "/analytics",
+//   authenticateJWT,
+//   createProxyMiddleware({
+//     target: SERVICES.ANALYTICS,
+//     changeOrigin: true,
+//     pathRewrite: { "^/analytics": "" },
+//   })
+// );
 
 app.get("/", (req, res) => {
   res.send("API Gateway is running");

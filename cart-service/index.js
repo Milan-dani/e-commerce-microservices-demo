@@ -1,60 +1,110 @@
-const express = require('express');
-const mongoose = require('mongoose');
+require("dotenv").config();
+const express = require("express");
+const mongoose = require("mongoose");
+const jwt = require("jsonwebtoken");
+const registerService = require("./serviceRegistry/registerService");
+const { get } = require("./serviceRegistry/serviceClient");
+const { authenticate } = require("./middleware/authMiddleware");
+const Cart = require("./models/Cart");
 
 const app = express();
 app.use(express.json());
 
 const PORT = process.env.PORT || 3003;
-const MONGO_URI = process.env.MONGO_URI || 'mongodb://localhost:27017/cart';
+const SERVICE_NAME = process.env.SERVICE_NAME || "cart";
+const JWT_SECRET = process.env.JWT_SECRET || "changeme";
+const MONGO_URI = process.env.MONGO_URI || "mongodb://localhost:27017/cart";
 
-// Cart schema
-const cartSchema = new mongoose.Schema({
-  userId: { type: String, required: true },
-  items: [
-    {
-      productId: String,
-      quantity: Number
-    }
-  ]
-});
-const Cart = mongoose.model('Cart', cartSchema);
+
+// Dynamic registration
+registerService(SERVICE_NAME, PORT);
 
 // Add item to cart
-app.post('/cart/:userId/add', async (req, res) => {
+app.post("/add", authenticate, async (req, res) => {
   const { productId, quantity } = req.body;
-  let cart = await Cart.findOne({ userId: req.params.userId });
-  if (!cart) cart = await Cart.create({ userId: req.params.userId, items: [] });
-  const itemIndex = cart.items.findIndex(i => i.productId === productId);
-  if (itemIndex > -1) {
-    cart.items[itemIndex].quantity += quantity;
-  } else {
-    cart.items.push({ productId, quantity });
+  
+  const {id :userId} = req.user;
+
+  try {
+    // Validate product exists
+    const product = await get("products", `/products/${productId}`);
+    if (!product) return res.status(404).json({ error: "Product not found" });
+
+    let cart = await Cart.findOne({ userId });
+    if (!cart) cart = await Cart.create({ userId, items: [] });
+
+    const itemIndex = cart.items.findIndex((i) => i.productId === productId);
+    if (itemIndex > -1) {
+      cart.items[itemIndex].quantity += quantity;
+    } else {
+      cart.items.push({ productId, quantity });
+    }
+
+    await cart.save();
+    res.json(cart);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
   }
-  await cart.save();
-  res.json(cart);
 });
 
+// update qunatity
+app.post("/update", authenticate, async (req, res) => {
+  const { productId, quantity } = req.body;
+  const {id :userId} = req.user;
+
+  try {
+    const cart = await Cart.findOne({ userId });
+    if (!cart) return res.status(404).json({ error: "Cart not found" });
+
+    const itemIndex = cart.items.findIndex((i) => i.productId === productId);
+    if (itemIndex === -1) return res.status(404).json({ error: "Item not in cart" });
+
+    cart.items[itemIndex].quantity = quantity;
+    await cart.save();
+    res.json(cart);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+
 // Remove item from cart
-app.post('/cart/:userId/remove', async (req, res) => {
+app.post("/remove", authenticate, async (req, res) => {
   const { productId } = req.body;
-  let cart = await Cart.findOne({ userId: req.params.userId });
-  if (!cart) return res.status(404).json({ error: 'Cart not found' });
-  cart.items = cart.items.filter(i => i.productId !== productId);
-  await cart.save();
-  res.json(cart);
+  const {id :userId} = req.user;
+
+  try {
+    let cart = await Cart.findOne({ userId });
+    if (!cart) return res.status(404).json({ error: "Cart not found" });
+
+    cart.items = cart.items.filter((i) => i.productId !== productId);
+    await cart.save();
+    res.json(cart);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
 });
 
 // Get cart
-app.get('/cart/:userId', async (req, res) => {
-  const cart = await Cart.findOne({ userId: req.params.userId });
-  if (!cart) return res.status(404).json({ error: 'Cart not found' });
-  res.json(cart);
+app.get("/", authenticate ,async (req, res) => {
+  const {id :userId} = req.user;
+  try {
+    const cart = await Cart.findOne({ userId });
+    if (!cart) return res.status(404).json({ error: "Cart not found" });
+    res.json(cart);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+app.get("/health", (req, res) => {
+  res.json({ status: "ok" });
 });
 
-mongoose.connect(MONGO_URI)
+mongoose
+  .connect(MONGO_URI)
   .then(() => {
     app.listen(PORT, () => {
       console.log(`Cart Service running on port ${PORT}`);
     });
   })
-  .catch(err => console.error('MongoDB connection error:', err));
+  .catch((err) => console.error("MongoDB connection error:", err));

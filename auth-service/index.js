@@ -3,24 +3,20 @@ const express = require('express');
 const mongoose = require('mongoose');
 const jwt = require('jsonwebtoken');
 const bcrypt = require('bcryptjs');
+const registerService = require('../cart-service/serviceRegistry/registerService');
+const User = require('./models/User');
 
 const app = express();
 app.use(express.json());
 
 const PORT = process.env.PORT || 3001;
+const SERVICE_NAME = process.env.SERVICE_NAME || "auth";
 const JWT_SECRET = process.env.JWT_SECRET || 'changeme';
 const MONGO_URI = process.env.MONGO_URI || 'mongodb://localhost:27017/auth';
 
-// User schema
-const userSchema = new mongoose.Schema({
-  firstName: {type: String, required: true},
-  lastName: {type: String, required: true},
-  username: { type: String, required: true, unique: true },
-  email: { type: String, required: true, unique: true },
-  password: { type: String, required: true },
-  role: { type: String, enum: ['customer', 'admin'], default: 'customer' }
-});
-const User = mongoose.model('User', userSchema);
+// Dynamic registration
+registerService(SERVICE_NAME, PORT);
+
 
 // Signup
 app.post('/signup', async (req, res) => {
@@ -32,7 +28,7 @@ app.post('/signup', async (req, res) => {
     const token = jwt.sign(
       { id: user._id, role: user.role },
       JWT_SECRET,
-      { expiresIn: '1h' }
+      { expiresIn: '12h' }
     );
     res.status(201).json({ message: 'User created', user: { firstName, lastName, username, email, role }, token });
   } catch (err) {
@@ -53,7 +49,10 @@ app.post('/login', async (req, res) => {
   const valid = await bcrypt.compare(password, user.password);
   if (!valid) return res.status(401).json({ error: 'Invalid credentials' });
   const token = jwt.sign({ id: user._id, role: user.role }, JWT_SECRET, { expiresIn: '12h' });
-  res.json({ token });
+   // Convert to plain JS object and remove password
+   const { password: _, ...userWithoutPassword } = user.toObject();
+  res.json({ message: 'Login Successful', user: userWithoutPassword, token })
+  // res.json({ token });
 });
 
 // JWT validation
@@ -65,6 +64,10 @@ app.get('/validate', (req, res) => {
     if (err) return res.status(403).json({ error: 'Invalid token' });
     res.json({ user });
   });
+});
+
+app.get("/health", (req, res) => {
+  res.json({ status: "ok" });
 });
 
 mongoose.connect(MONGO_URI)

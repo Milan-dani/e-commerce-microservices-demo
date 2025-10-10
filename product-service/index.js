@@ -8,6 +8,7 @@ const path = require("path");
 const upload = require("./middleware/upload");
 const Product = require("./models/Product");
 const { authenticate, requireAdmin } = require("./middleware/authMiddleware");
+const registerService = require("../cart-service/serviceRegistry/registerService");
 
 const app = express();
 // ✅ Use JSON parser only for non-file routes
@@ -19,10 +20,14 @@ app.use(express.json());
 app.use("/uploads", express.static(path.join(__dirname, "uploads")));
 
 const PORT = process.env.PORT || 3002;
+const SERVICE_NAME = process.env.SERVICE_NAME || "products";
 const JWT_SECRET = process.env.JWT_SECRET || "changeme";
 const MONGO_URI = process.env.MONGO_URI || "mongodb://localhost:27017/products";
 
 const productImagePlaceholder = "product-image-placeholder.png";
+
+// Dynamic registration
+registerService(SERVICE_NAME, PORT);
 
 // Middleware to Check JWT and Admin Role
 const adminAuth = (req, res, next) => {
@@ -469,6 +474,10 @@ app.delete("/products/:id", authenticate, requireAdmin, async (req, res) => {
     console.error("Delete product failed:", err);
     res.status(500).json({ error: "Failed to delete product" });
   }
+});
+
+app.get("/health", (req, res) => {
+  res.json({ status: "ok" });
 });
 
 mongoose
