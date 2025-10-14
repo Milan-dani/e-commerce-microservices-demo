@@ -378,6 +378,9 @@ app.get("/categories", async (req, res) => {
 app.get("/products/:id", async (req, res) => {
   const product = await Product.findById(req.params.id);
   if (!product) return res.status(404).json({ error: "Not found" });
+  if (product.image) {
+    product.image = getFullImageUrl(req, product.image);
+  }
   res.json(product);
 });
 
@@ -460,9 +463,12 @@ app.delete("/products/:id", authenticate, requireAdmin, async (req, res) => {
 
     // Delete associated image file if exists
     if (product.image) {
-      const imagePath = path.join(process.cwd(), product.image);
-      if (fs.existsSync(imagePath)) {
-        fs.unlinkSync(imagePath);
+      // if it's placeholder image do nothing.
+      if (product.image !== `/uploads/${productImagePlaceholder}`) {
+        const imagePath = path.join(process.cwd(), product.image);
+        if (fs.existsSync(imagePath)) {
+          fs.unlinkSync(imagePath);
+        }
       }
     }
 
