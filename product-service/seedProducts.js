@@ -37,11 +37,12 @@ async function seedProducts(count = 20) {
 
       const category = faker.commerce.department();
       const description = faker.commerce.productDescription();
-      const image = faker.image.urlLoremFlickr({
-        category: "product",
-        width: 640,
-        height: 480,
-      });
+      // const image = faker.image.urlLoremFlickr({
+      //   category: "product",
+      //   width: 640,
+      //   height: 480,
+      // });
+      const image = "/uploads/1760009004398.jpg";
       const rating = parseFloat(
         faker.number.float({ min: 3, max: 5, precision: 0.1 }).toFixed(1)
       );

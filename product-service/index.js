@@ -11,12 +11,10 @@ const { authenticate, requireAdmin } = require("./middleware/authMiddleware");
 const registerService = require("../cart-service/serviceRegistry/registerService");
 
 const app = express();
-// ✅ Use JSON parser only for non-file routes
 app.use(express.json());
-// app.use(express.urlencoded({ extended: true }));
 
 // app.use('/uploads', express.static('uploads'));
-// ✅ Serve static uploads folder so frontend can access images
+// Serve static uploads folder so frontend can access images
 app.use("/uploads", express.static(path.join(__dirname, "uploads")));
 
 const PORT = process.env.PORT || 3002;
@@ -481,6 +479,37 @@ app.delete("/products/:id", authenticate, requireAdmin, async (req, res) => {
     res.status(500).json({ error: "Failed to delete product" });
   }
 });
+
+// Decrement product quantity
+app.post("/:id/decrement", async (req, res) => {
+  
+  const { id } = req.params;
+  const { quantity } = req.body;
+
+  if (!quantity || quantity <= 0) {
+    return res.status(400).json({ error: "Quantity must be a positive number" });
+  }
+
+  try {
+    const product = await Product.findById(id);
+
+    if (!product) return res.status(404).json({ error: "Product not found" });
+
+    if (product.quantity < quantity) {
+      return res.status(400).json({ error: "Not enough stock" });
+    }
+
+    // Decrement quantity
+    product.quantity -= quantity;
+    await product.save();
+
+    res.json({ message: "Quantity decremented", product });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: "Server error" });
+  }
+});
+
 
 app.get("/health", (req, res) => {
   res.json({ status: "ok" });

@@ -10,16 +10,16 @@ const PORT = process.env.PORT || 8080;
 const JWT_SECRET = process.env.JWT_SECRET || "changeme";
 
 // Microservice URLs (env fallback to localhost)
-const SERVICES = {
-  AUTH: process.env.AUTH_SERVICE_URL || "http://localhost:3001",
-  PRODUCTS: process.env.PRODUCTS_SERVICE_URL || "http://localhost:3002",
-  CART: process.env.CART_SERVICE_URL || "http://localhost:3003",
-  ORDERS: process.env.ORDERS_SERVICE_URL || "http://localhost:3004",
-  PAYMENTS: process.env.PAYMENTS_SERVICE_URL || "http://localhost:3005",
-  INVENTORY: process.env.INVENTORY_SERVICE_URL || "http://localhost:3006",
-  RECOMMENDATIONS: process.env.RECOMMENDATIONS_SERVICE_URL || "http://localhost:3007",
-  ANALYTICS: process.env.ANALYTICS_SERVICE_URL || "http://localhost:3008",
-};
+// const SERVICES = {
+//   AUTH: process.env.AUTH_SERVICE_URL || "http://localhost:3001",
+//   PRODUCTS: process.env.PRODUCTS_SERVICE_URL || "http://localhost:3002",
+//   CART: process.env.CART_SERVICE_URL || "http://localhost:3003",
+//   ORDERS: process.env.ORDERS_SERVICE_URL || "http://localhost:3004",
+//   PAYMENTS: process.env.PAYMENTS_SERVICE_URL || "http://localhost:3005",
+//   INVENTORY: process.env.INVENTORY_SERVICE_URL || "http://localhost:3006",
+//   RECOMMENDATIONS: process.env.RECOMMENDATIONS_SERVICE_URL || "http://localhost:3007",
+//   ANALYTICS: process.env.ANALYTICS_SERVICE_URL || "http://localhost:3008",
+// };
 
 // JWT validation middleware
 function authenticateJWT(req, res, next) {
