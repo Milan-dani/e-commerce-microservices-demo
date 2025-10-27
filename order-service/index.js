@@ -2,13 +2,21 @@ require("dotenv").config();
 const express = require("express");
 // const bodyParser = require("body-parser");
 const { connectDB, sequelize } = require("./db/sequelize");
-const registerService = require("./serviceRegistry/registerService");
+// const registerService = require("./serviceRegistry/registerService");
 const { get, post } = require("./serviceRegistry/serviceClient");
 const { authenticate, requireAdmin } = require("./middleware/authMiddleware");
 const Order = require("./models/Order");
 const OrderSequence = require("./models/OrderSequence");
 const { startSubscriber } = require("./nats/orderSubscriber");
 const { Op, Sequelize } = require("sequelize");
+const {
+  registerService,
+  startListening,
+  justConnectNATS,
+  setupEventSubscriptions,
+} = require("./subscriber");
+const { connectNats } = require("./utils/natsClient");
+const { drainOutbox, emit } = require("./utils/eventEmitter");
 
 const app = express();
 // app.use(bodyParser.json());
@@ -16,6 +24,8 @@ app.use(express.json());
 
 const PORT = process.env.PORT || 3004;
 const SERVICE_NAME = process.env.SERVICE_NAME || "orders";
+const MESSAGE_BROKER_URL =
+  process.env.MESSAGE_BROKER_URL || "http://localhost:3009";
 
 async function getNextOrderNumber() {
   const today = new Date().toISOString().slice(0, 10); // YYYY-MM-DD
@@ -44,12 +54,10 @@ async function getNextOrderNumber() {
     }
 
     const seqPadded = String(seq).padStart(4, "0"); // 0001
-    const dateStr = today.replace(/-/g, "");        // YYYYMMDD
+    const dateStr = today.replace(/-/g, ""); // YYYYMMDD
     return `ORD-${dateStr}-${seqPadded}`;
   });
 }
-
-
 
 // Health endpoint for Consul
 app.get("/health", (req, res) => res.json({ status: "ok" }));
@@ -59,9 +67,10 @@ app.get("/health", (req, res) => res.json({ status: "ok" }));
 
 app.post("/checkout/create", authenticate, async (req, res) => {
   const { id: userId } = req.user;
-  const { items ,shippingFee = 0} = req.body;
+  const { items, shippingFee = 0 } = req.body;
 
-  if (!items || !items.length) return res.status(400).json({ error: "Cart is empty" });
+  if (!items || !items.length)
+    return res.status(400).json({ error: "Cart is empty" });
 
   let subtotal = 0;
   const validatedItems = [];
@@ -75,11 +84,11 @@ app.post("/checkout/create", authenticate, async (req, res) => {
       name: product.name,
       price: product.price,
       quantity: item.quantity,
-      image: product.image
+      image: product.image,
     });
     subtotal += product.price * item.quantity;
   }
-  total = Number((subtotal + shippingFee).toFixed(2))
+  total = Number((subtotal + shippingFee).toFixed(2));
   const orderNumber = await getNextOrderNumber();
   const order = await Order.create({
     userId,
@@ -92,17 +101,44 @@ app.post("/checkout/create", authenticate, async (req, res) => {
     currentStep: 1,
   });
 
+  // Emit Event To NATS
+  await emit("order.created", {
+    orderId: order.id,
+    userId,
+    total,
+  });
+
   res.json(order);
 });
 app.patch("/checkout/:orderId/shipping", authenticate, async (req, res) => {
   const { id: userId } = req.user;
   const { orderId } = req.params;
-  const { firstName, lastName, email, phone, address, city, state, zipCode, country} = req.body;
+  const {
+    firstName,
+    lastName,
+    email,
+    phone,
+    address,
+    city,
+    state,
+    zipCode,
+    country,
+  } = req.body;
 
   const order = await Order.findOne({ where: { id: orderId, userId } });
   if (!order) return res.status(404).json({ error: "Order not found" });
 
-  order.shippingInfo = {firstName, lastName, email, phone, address, city, state, zipCode, country };
+  order.shippingInfo = {
+    firstName,
+    lastName,
+    email,
+    phone,
+    address,
+    city,
+    state,
+    zipCode,
+    country,
+  };
   order.currentStep = 2;
   await order.save();
 
@@ -112,18 +148,44 @@ app.patch("/checkout/:orderId/payment", authenticate, async (req, res) => {
   const { id: userId } = req.user;
   const { orderId } = req.params;
   // const { paymentMethod, cardToken } = req.body; // cardToken from payment gateway
-  const { cardNumber, expiryDate, cvv, cardName } = req.body; // cardToken from payment gateway
+  const paymentInfo = req.body; // cardToken from payment gateway
 
   const order = await Order.findOne({ where: { id: orderId, userId } });
   if (!order) return res.status(404).json({ error: "Order not found" });
 
   // order.paymentInfo = { method: paymentMethod, cardToken, status: "pending" };
-  order.paymentInfo = { cardNumber, expiryDate, cvv, cardName, status: "pending" };
+  order.paymentInfo = {
+...paymentInfo,
+    status: "pending",
+  };
   order.currentStep = 3;
   await order.save();
 
   res.json(order);
 });
+
+// app.patch("/checkout/:orderId/payment", authenticate, async (req, res) => {
+//   const { id: userId } = req.user;
+//   const { orderId } = req.params;
+//   // const { paymentMethod, cardToken } = req.body; // cardToken from payment gateway
+//   const { cardNumber, expiryDate, cvv, cardName } = req.body; // cardToken from payment gateway
+
+//   const order = await Order.findOne({ where: { id: orderId, userId } });
+//   if (!order) return res.status(404).json({ error: "Order not found" });
+
+//   // order.paymentInfo = { method: paymentMethod, cardToken, status: "pending" };
+//   order.paymentInfo = {
+//     cardNumber,
+//     expiryDate,
+//     cvv,
+//     cardName,
+//     status: "pending",
+//   };
+//   order.currentStep = 3;
+//   await order.save();
+
+//   res.json(order);
+// });
 app.post("/checkout/:orderId/place", authenticate, async (req, res) => {
   const { id: userId } = req.user;
   const { orderId } = req.params;
@@ -176,9 +238,12 @@ app.post("/checkout/:orderId/place", authenticate, async (req, res) => {
   // order.paymentInfo = { ...order.paymentInfo, status: "failed", reason: data.reason || "payment-service-unavailable" };
   // order.status = "pending";
 
-
   // //////////////////////////
-  const paymentResult = { success : true, transactionId: '328173923jsjcscy2y12739', status: "paid"}
+  const paymentResult = {
+    success: true,
+    transactionId: "328173923jsjcscy2y12739",
+    status: "paid",
+  };
 
   if (paymentResult.success) {
     order.paymentInfo.status = "paid";
@@ -228,6 +293,20 @@ app.get("/", authenticate, async (req, res) => {
       shippingFee: Number(order.shippingFee),
     }));
 
+    // // added timeout to check loading states in frontend
+    // setTimeout(() => {
+    //   console.log("timeout");
+    //    // Respond with clean pagination format
+    //    return res.json({
+    //     // role: role || "user",
+    //     page: pageNumber,
+    //     limit: limitNumber,
+    //     total,
+    //     totalPages: Math.ceil(total / limitNumber),
+    //     orders: formattedOrders,
+    //   });
+    // }, 10000);
+
     // Respond with clean pagination format
     return res.json({
       // role: role || "user",
@@ -266,28 +345,28 @@ app.get("/admin/orders", authenticate, requireAdmin, async (req, res) => {
     if (status && status.toLowerCase() !== "all") {
       where.status = status;
     }
-//  Search filter: orderNumber or shippingInfo.firstName/lastName
-if (search) {
-  const searchTerm = `%${search}%`;
-console.log(searchTerm);
+    //  Search filter: orderNumber or shippingInfo.firstName/lastName
+    if (search) {
+      const searchTerm = `%${search}%`;
+      console.log(searchTerm);
 
-  where[Op.or] = [
-    { orderNumber: { [Op.iLike]: searchTerm } },
-    Sequelize.where(
-      Sequelize.cast(Sequelize.json("shippingInfo.firstName"), "TEXT"),
-      { [Op.iLike]: searchTerm }
-    ),
-    Sequelize.where(
-      Sequelize.cast(Sequelize.json("shippingInfo.lastName"), "TEXT"),
-      { [Op.iLike]: searchTerm }
-    ),
-  ];
-}
+      where[Op.or] = [
+        { orderNumber: { [Op.iLike]: searchTerm } },
+        Sequelize.where(
+          Sequelize.cast(Sequelize.json("shippingInfo.firstName"), "TEXT"),
+          { [Op.iLike]: searchTerm }
+        ),
+        Sequelize.where(
+          Sequelize.cast(Sequelize.json("shippingInfo.lastName"), "TEXT"),
+          { [Op.iLike]: searchTerm }
+        ),
+      ];
+    }
 
     // Fetch paginated results with optional user join for email search
     const { count: total, rows: orders } = await Order.findAndCountAll({
       where,
-      
+
       limit: limitNumber,
       offset,
       order: [[sortBy, sortOrder.toUpperCase()]],
@@ -369,7 +448,6 @@ console.log(searchTerm);
 //   const { page = 1, limit = 10, status } = req.query;
 //   const where = { userId };
 //   if (status) where.status = status;
-  
 
 //   const orders = await Order.findAll({
 //     where,
@@ -387,19 +465,19 @@ app.get("/:id", authenticate, async (req, res) => {
   const order = await Order.findOne({ where: { id: req.params.id, userId } });
   if (!order) return res.status(404).json({ error: "Order not found" });
   res.json({
-    ...order.toJSON(), // or order if using Sequelize 
+    ...order.toJSON(), // or order if using Sequelize
     subtotal: Number(order.subtotal),
     total: Number(order.total),
     shippingFee: Number(order.shippingFee),
   });
   // res.json(order);
 });
-app.get("/admin/:id", authenticate, requireAdmin ,async (req, res) => {
+app.get("/admin/:id", authenticate, requireAdmin, async (req, res) => {
   // const { id: userId } = req.user;
   const order = await Order.findOne({ where: { id: req.params.id } });
   if (!order) return res.status(404).json({ error: "Order not found" });
   res.json({
-    ...order.toJSON(), // or order if using Sequelize 
+    ...order.toJSON(), // or order if using Sequelize
     subtotal: Number(order.subtotal),
     total: Number(order.total),
     shippingFee: Number(order.shippingFee),
@@ -407,29 +485,50 @@ app.get("/admin/:id", authenticate, requireAdmin ,async (req, res) => {
   // res.json(order);
 });
 
-app.patch("/admin/orders/:orderId/status", authenticate, requireAdmin ,async (req, res) => {
-  const { orderId } = req.params;
-  const { status } = req.body;
-  
-  const validStatuses = ["pending", "paid", "processing", "shipped", "delivered", "cancelled", "fulfilled"];
-  if (!validStatuses.includes(status)) return res.status(400).json({ error: "Invalid status" });
+app.patch(
+  "/admin/orders/:orderId/status",
+  authenticate,
+  requireAdmin,
+  async (req, res) => {
+    const { orderId } = req.params;
+    const { status } = req.body;
 
-  const order = await Order.findOne({ where: { id: orderId } });
-  if (!order) return res.status(404).json({ error: "Order not found" });
+    const validStatuses = [
+      "pending",
+      "paid",
+      "processing",
+      "shipped",
+      "delivered",
+      "cancelled",
+      "fulfilled",
+    ];
+    if (!validStatuses.includes(status))
+      return res.status(400).json({ error: "Invalid status" });
 
-  order.status = status;
-  await order.save();
+    const order = await Order.findOne({ where: { id: orderId } });
+    if (!order) return res.status(404).json({ error: "Order not found" });
 
-  if (status === "fulfilled") {
-    // Decrement stock via Product service
-    for (const item of order.items) {
-      await post("products", `/${item.productId}/decrement`, { quantity: item.quantity });
+    order.status = status;
+    await order.save();
+
+    if (status === "fulfilled") {
+      // Decrement stock via Product service
+      for (const item of order.items) {
+        await post("products", `/${item.productId}/decrement`, {
+          quantity: item.quantity,
+        });
+      }
     }
+
+    // Emit event to NATS
+    await emit("order.status.updated", {
+      orderId,
+      status,
+    });
+
+    res.json(order);
   }
-
-  res.json(order);
-});
-
+);
 
 // app.post("/checkout/create", authenticate, async (req, res) => {
 //   const { id: userId } = req.user;
@@ -539,28 +638,44 @@ app.patch("/admin/orders/:orderId/status", authenticate, requireAdmin ,async (re
 //   res.json(order);
 // });
 
-
-
-
-
-
-
-
-
-
-
 // Create a new order
 
+async function registerEvents() {
+  try {
+    const response = await fetch(`${MESSAGE_BROKER_URL}/register-subscriber`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        service: "order-service",
+        topics: ["payment.success", "payment.failed", "inventory.low"],
+      }),
+    });
 
+    if (!response.ok) {
+      throw new Error(
+        `Failed to register: ${response.status} ${response.statusText}`
+      );
+    }
 
+    console.log("✅ Order Service registered with Message Broker");
+  } catch (error) {
+    console.error("❌ Failed to register Order Service:", error.message);
+  }
+}
 
 async function startServer() {
   await connectDB();
   await sequelize.sync(); // ensures table creation
   app.listen(PORT, async () => {
     console.log(`🛒 Order Service running on port ${PORT}`);
-    await registerService(SERVICE_NAME, PORT);
-    startSubscriber();
+    // await registerService(SERVICE_NAME, PORT);
+    // registerEvents();
+    // startSubscriber();
+    await registerService().then(justConnectNATS);
+    await drainOutbox();
+    await setupEventSubscriptions();
   });
 }
 

@@ -7,8 +7,8 @@ const fs = require("fs");
 const path = require("path");
 const upload = require("./middleware/upload");
 const Product = require("./models/Product");
+const registerService = require("./serviceRegistry/registerService");
 const { authenticate, requireAdmin } = require("./middleware/authMiddleware");
-const registerService = require("../cart-service/serviceRegistry/registerService");
 
 const app = express();
 app.use(express.json());
@@ -79,6 +79,7 @@ app.post(
     }
   }
 );
+
 // app.post('/products', async (req, res) => {
 //   try {
 //     const product = await Product.create(req.body);
@@ -209,6 +210,7 @@ app.post(
 // });
 
 // GET /products — both user and admin
+
 app.get("/products", async (req, res) => {
   try {
     const {
@@ -345,16 +347,28 @@ app.get("/products", async (req, res) => {
         products: adminProducts,
       });
     }
-
+    // // Delay for testing
+    // setTimeout(() => {
+    //   console.log("timeout");
+    //   // Regular user response
+    //   return res.json({
+    //     role: "user",
+    //     page: pageNumber,
+    //     limit: limitNumber,
+    //     total,
+    //     totalPages: Math.ceil(total / limitNumber),
+    //     products,
+    //   });
+    // }, 10000);
     // Regular user response
-    return res.json({
-      role: "user",
-      page: pageNumber,
-      limit: limitNumber,
-      total,
-      totalPages: Math.ceil(total / limitNumber),
-      products,
-    });
+      return res.json({
+        role: "user",
+        page: pageNumber,
+        limit: limitNumber,
+        total,
+        totalPages: Math.ceil(total / limitNumber),
+        products,
+      });
   } catch (err) {
     console.error("Product Fetch Error:", err);
     res.status(500).json({ message: "Server error" });
@@ -482,12 +496,13 @@ app.delete("/products/:id", authenticate, requireAdmin, async (req, res) => {
 
 // Decrement product quantity
 app.post("/:id/decrement", async (req, res) => {
-  
   const { id } = req.params;
   const { quantity } = req.body;
 
   if (!quantity || quantity <= 0) {
-    return res.status(400).json({ error: "Quantity must be a positive number" });
+    return res
+      .status(400)
+      .json({ error: "Quantity must be a positive number" });
   }
 
   try {
@@ -509,7 +524,6 @@ app.post("/:id/decrement", async (req, res) => {
     res.status(500).json({ error: "Server error" });
   }
 });
-
 
 app.get("/health", (req, res) => {
   res.json({ status: "ok" });

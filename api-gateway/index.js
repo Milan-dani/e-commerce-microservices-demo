@@ -1,9 +1,9 @@
-require('dotenv').config();
+require("dotenv").config();
 const express = require("express");
 const cors = require("cors");
 const jwt = require("jsonwebtoken");
-const { proxyToService } = require('./serviceRegistory');
-const { createProxyMiddleware } = require('http-proxy-middleware');
+const { proxyToService } = require("./serviceRegistory");
+const { createProxyMiddleware } = require("http-proxy-middleware");
 
 const app = express();
 const PORT = process.env.PORT || 8080;
@@ -38,7 +38,6 @@ function authenticateJWT(req, res, next) {
 
 app.use(cors());
 
-
 // proxy Route with service Registory /dynamic URLs
 
 app.use("/auth", proxyToService("auth"));
@@ -51,6 +50,10 @@ app.use("/recommendations", proxyToService("recommendations"));
 app.use("/analytics", proxyToService("analytics"));
 // app.use("/auth", proxyToService("auth"));
 
+app.use("/test", async (req, res) => {
+  console.log("OK");
+  res.json({ message: "OK" });
+});
 
 // // Proxy routes
 // app.use(

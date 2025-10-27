@@ -15,15 +15,14 @@ const SERVICE_NAME = process.env.SERVICE_NAME || "cart";
 const JWT_SECRET = process.env.JWT_SECRET || "changeme";
 const MONGO_URI = process.env.MONGO_URI || "mongodb://localhost:27017/cart";
 
-
 // Dynamic registration
 registerService(SERVICE_NAME, PORT);
 
 // Add item to cart
 app.post("/add", authenticate, async (req, res) => {
   const { productId, quantity } = req.body;
-  
-  const {id :userId} = req.user;
+
+  const { id: userId } = req.user;
 
   try {
     // Validate product exists
@@ -50,14 +49,15 @@ app.post("/add", authenticate, async (req, res) => {
 // update qunatity
 app.post("/update", authenticate, async (req, res) => {
   const { productId, quantity } = req.body;
-  const {id :userId} = req.user;
+  const { id: userId } = req.user;
 
   try {
     const cart = await Cart.findOne({ userId });
     if (!cart) return res.status(404).json({ error: "Cart not found" });
 
     const itemIndex = cart.items.findIndex((i) => i.productId === productId);
-    if (itemIndex === -1) return res.status(404).json({ error: "Item not in cart" });
+    if (itemIndex === -1)
+      return res.status(404).json({ error: "Item not in cart" });
 
     cart.items[itemIndex].quantity = quantity;
     await cart.save();
@@ -67,11 +67,10 @@ app.post("/update", authenticate, async (req, res) => {
   }
 });
 
-
 // Remove item from cart
 app.post("/remove", authenticate, async (req, res) => {
   const { productId } = req.body;
-  const {id :userId} = req.user;
+  const { id: userId } = req.user;
 
   try {
     let cart = await Cart.findOne({ userId });
@@ -86,11 +85,17 @@ app.post("/remove", authenticate, async (req, res) => {
 });
 
 // Get cart
-app.get("/", authenticate ,async (req, res) => {
-  const {id :userId} = req.user;
+app.get("/", authenticate, async (req, res) => {
+  const { id: userId } = req.user;
   try {
     const cart = await Cart.findOne({ userId });
     if (!cart) return res.status(404).json({ error: "Cart not found" });
+    //     // added timeout to check loading states in frontend
+    // setTimeout(() => {
+    //   console.log("timeout");
+    //    res.json(cart);
+    // }, 20000);
+
     res.json(cart);
   } catch (err) {
     res.status(500).json({ error: err.message });

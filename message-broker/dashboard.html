@@ -1,0 +1,108 @@
+<!-- <!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <title>Message Broker Dashboard</title>
+    <script src="https://cdn.socket.io/4.7.2/socket.io.min.js"></script>
+    <style>
+      body {
+        font-family: Arial, sans-serif;
+        padding: 20px;
+        background: #fafafa;
+      }
+      h1 {
+        color: #2c3e50;
+      }
+      table {
+        border-collapse: collapse;
+        width: 100%;
+        margin-top: 20px;
+      }
+      th, td {
+        border: 1px solid #ddd;
+        padding: 8px;
+      }
+      th {
+        background: #2c3e50;
+        color: white;
+      }
+    </style>
+  </head>
+  <body>
+    <h1>Message Broker Dashboard</h1>
+    <h3>Live Registered Topics</h3>
+    <table id="topicsTable">
+      <thead>
+        <tr><th>Topic</th><th>Subscribers</th></tr>
+      </thead>
+      <tbody></tbody>
+    </table>
+    <script>
+      const socket = io();
+      const tableBody = document.querySelector("#topicsTable tbody");
+
+      socket.on("registryUpdate", (data) => {
+        const topics = data.topics;
+        tableBody.innerHTML = "";
+        Object.entries(topics).forEach(([topic, subs]) => {
+          const tr = document.createElement("tr");
+          tr.innerHTML = `<td>${topic}</td><td>${subs.join(", ")}</td>`;
+          tableBody.appendChild(tr);
+        });
+      });
+    </script>
+  </body>
+</html> -->
+
+
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="UTF-8" />
+    <title>Message Broker Dashboard</title>
+    <script src="https://cdn.socket.io/4.7.2/socket.io.min.js"></script>
+    <style>
+      body { font-family: Arial; background: #fafafa; padding: 20px; }
+      h2 { color: #2c3e50; }
+      table { border-collapse: collapse; width: 100%; margin-top: 20px; }
+      th, td { border: 1px solid #ccc; padding: 8px; }
+      th { background: #2c3e50; color: #fff; }
+    </style>
+  </head>
+  <body>
+    <h2>Message Broker Dashboard</h2>
+    <h3>Registered Topics</h3>
+    <table id="topics">
+      <thead><tr><th>Topic</th><th>Subscribers</th></tr></thead>
+      <tbody></tbody>
+    </table>
+
+    <h3>Live Event Stats</h3>
+    <table id="events">
+      <thead><tr><th>Event</th><th>Count</th><th>Last Published</th></tr></thead>
+      <tbody></tbody>
+    </table>
+
+    <script>
+      const socket = io();
+      const topicTable = document.querySelector("#topics tbody");
+      const eventTable = document.querySelector("#events tbody");
+
+      socket.on("registryUpdate", (data) => {
+        topicTable.innerHTML = "";
+        for (const [topic, subs] of Object.entries(data.topics)) {
+          const row = `<tr><td>${topic}</td><td>${subs.join(", ")}</td></tr>`;
+          topicTable.insertAdjacentHTML("beforeend", row);
+        }
+      });
+
+      socket.on("eventStatsUpdate", (stats) => {
+        eventTable.innerHTML = "";
+        for (const [event, s] of Object.entries(stats)) {
+          const row = `<tr><td>${event}</td><td>${s.count}</td><td>${s.lastPublished}</td></tr>`;
+          eventTable.insertAdjacentHTML("beforeend", row);
+        }
+      });
+    </script>
+  </body>
+</html>
