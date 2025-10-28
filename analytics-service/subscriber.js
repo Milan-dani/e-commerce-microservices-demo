@@ -13,12 +13,21 @@ const STREAM = "ECOM_EVENTS";
 const SUBSCRIBED_TOPICS = [
   "order.created",
   "order.placed",
+  "order.paid", //
   "payment.success",
+  "payment.failed", //
   "product.viewed",
   "product.added_to_cart",
-  "user.signup",
-  "user.login",
+  // "user.signup",
+  // "user.login",
+  "user.created",
 ];
+// const SUBSCRIBED_TOPICS = [
+//   "order.*",
+//   "payment.*",
+//   "product.*",
+//   "user.*",
+// ]
 
 // Helper: perform a JSON POST request using fetch
 async function postJSON(url, data) {
@@ -113,13 +122,19 @@ async function startListening (){
 
   for (const topic of SUBSCRIBED_TOPICS) {
     await subscribeEvent(topic, async (data) => {
-      await Event.create({
-        event: topic,
-        source: data.source || "unknown",
-        payload: data,
-        timestamp: data.timestamp ? new Date(data.timestamp) : new Date(),
-      });
-      console.log(`📊 Analytics saved event: ${topic}`);
+      
+      try {
+        await Event.create({
+          event: topic,
+          source: data.source || "unknown",
+          payload: data,
+          timestamp: data.timestamp ? new Date(data.timestamp) : new Date(),
+        });
+        console.log(`📊 Analytics saved event: ${topic}`);
+        
+      } catch (error) {
+        console.log(`❌ Analytics couldn't save event: ${topic}`);
+      }
     }, { jetstream: true });
   }
 }

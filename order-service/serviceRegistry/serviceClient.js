@@ -70,20 +70,48 @@ async function get(serviceName, path) {
 //   if (!res.ok) throw new Error(`Request failed with status ${res.status}`);
 //   return res.json();
 // }
+
+
+// async function post(serviceName, path, body) {
+//   try {
+//     const baseUrl = await getServiceUrl(serviceName);
+//     const res = await fetch(`${baseUrl}${path}`, {
+//       method: "POST",
+//       headers: { "Content-Type": "application/json" },
+//       body: JSON.stringify(body),
+//     });
+//     if (!res.ok) throw new Error(`Request failed with status ${res.status}`);
+//     return res.json();
+//   } catch (err) {
+//     console.error(`POST ${serviceName}${path} failed:`, err.message);
+//     throw err;
+//   }
+// }
 async function post(serviceName, path, body) {
+  const baseUrl = await getServiceUrl(serviceName);
   try {
-    const baseUrl = await getServiceUrl(serviceName);
     const res = await fetch(`${baseUrl}${path}`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(body),
     });
-    if (!res.ok) throw new Error(`Request failed with status ${res.status}`);
-    return res.json();
+
+    const data = await res.json().catch(() => ({}));
+
+    // ✅ If it's a 4xx or 5xx, still return response with details
+    if (!res.ok) {
+      const err = new Error(data.reason || data.message || `Request failed: ${res.status}`);
+      err.status = res.status;
+      err.response = data;
+      throw err;
+    }
+
+    return data;
   } catch (err) {
     console.error(`POST ${serviceName}${path} failed:`, err.message);
     throw err;
   }
 }
+
 
 module.exports = { getServiceUrl, get, post };

@@ -1,4 +1,3 @@
-// const { connectNATS, getCodec } = require("../message-broker/natsConnection");
 const registerServiceConsul = require("./serviceRegistry/registerService");
 const { emit } = require("./utils/eventEmitter");
 const {
@@ -7,22 +6,14 @@ const {
   subscribeEvent,
 } = require("./utils/natsClient");
 
-const PORT = process.env.PORT || 3004;
+const PORT = process.env.PORT || 3001;
 const CONSUL_URL = process.env.LOCAL_CONSUL_URL || "http://localhost:8500";
 const MESSAGE_BROKER_URL =
   process.env.MESSAGE_BROKER_URL || "http://localhost:3009";
-const SERVICE_NAME = process.env.SERVICE_NAME || "payments";
+const SERVICE_NAME = process.env.SERVICE_NAME || "auth";
 
-// const SERVICE_NAME = "analytics-service";
 const STREAM = "ECOM_EVENTS";
-const SUBSCRIBED_TOPICS = [
-  "order.created",
-  "order.updated",
-  "order.completed",
-  "order.status.updated",
-  "payment.success",
-  "payment.failed",
-];
+const SUBSCRIBED_TOPICS = ["user.created"];
 
 // Helper: perform a JSON POST request using fetch
 async function postJSON(url, data) {
@@ -71,29 +62,6 @@ async function registerService() {
 }
 
 // Start listening to NATS topics
-async function startListening_Old() {
-  const nc = await connectNATS();
-  const codec = getCodec();
-
-  for (const subject of SUBSCRIBED_TOPICS) {
-    const sub = nc.subscribe(subject);
-    console.log(`📡 Subscribed to event: ${subject}`);
-
-    (async () => {
-      for await (const msg of sub) {
-        const data = codec.decode(msg.data);
-        console.log(`📥 [${subject}] Event received:`, data);
-
-        await Event.create({
-          event: subject,
-          source: data.source || "unknown",
-          payload: data,
-        });
-      }
-    })();
-  }
-}
-
 async function startListening() {
   await connectNats();
   await ensureStream(STREAM, SUBSCRIBED_TOPICS);
@@ -122,37 +90,8 @@ async function justConnectNATS() {
   await ensureStream(STREAM, SUBSCRIBED_TOPICS);
 }
 
-// function to recieve and process events
-async function setupEventSubscriptions() {
-  await subscribeEvent(
-    "payment.success",
-    async (data) => {
-      console.log(`✅ Payment successful for Order ${data.orderId}`);
-      await emit("order.completed", {
-        orderId: data.orderId,
-        timestamp: new Date().toISOString(),
-      });
-    },
-    { jetstream: true }
-  );
-
-  await subscribeEvent(
-    "payment.failed",
-    async (data) => {
-      console.log(`❌ Payment failed for Order ${data.orderId}`);
-      await emit("order.status.updated", {
-        orderId: data.orderId,
-        status: "PAYMENT_FAILED",
-        reason: data.reason,
-      });
-    },
-    { jetstream: true }
-  );
-}
-
 module.exports = {
   registerService,
   startListening,
   justConnectNATS,
-  setupEventSubscriptions,
 };

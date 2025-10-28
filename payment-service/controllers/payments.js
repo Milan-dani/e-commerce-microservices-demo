@@ -1,95 +1,204 @@
 // controllers/payments.js
-
-const { publishEvent } = require("../nats/publisher");
+const { emit } = require("../utils/eventEmitter");
 const redis = require("../utils/redisClient");
 const uuid = require("uuid").v4;
+const Stripe = require("stripe");
 
-
-/**
- * Idempotency storage in Redis.
- * Key: "idempotency:{key}"
- * Value: JSON stringified result { success, transactionId, status, reason }
- * TTL: optional (e.g., 24h)
- */
+const stripe = new Stripe(process.env.STRIPE_SECRET_KEY);
 const IDEMPOTENCY_TTL = Number(process.env.IDEMPOTENCY_TTL_SEC || 24 * 3600);
 
 async function processPaymentHandler(req, res) {
-  const { orderId, amount, cardToken, userId, idempotencyKey } = req.body;
-  if (!orderId || !amount || !cardToken) return res.status(400).json({ success: false, reason: "orderId, amount and cardToken required" });
+  const { orderId, amount, userId, paymentMethodId, idempotencyKey } = req.body;
 
-  const key = `idempotency:${idempotencyKey || `${orderId}:${cardToken}`}`;
+  if (!orderId || !amount || !paymentMethodId)
+    return res.status(400).json({ success: false, reason: "orderId, amount, and paymentMethodId required" });
+
+  // const key = `idempotency:${idempotencyKey || `${orderId}:${paymentMethodId}`}`;
+  const key = `idempotency:idempotency:${orderId}${orderId}:${paymentMethodId}:${Date.now()}`; // unique key everytime for testing
+  
+  console.log("[Stripe] Processing payment for", orderId, "using", paymentMethodId);
 
   try {
-    // check redis
     const cached = await redis.get(key);
-    if (cached) {
-      const parsed = JSON.parse(cached);
-      return res.status(200).json(parsed);
-    }
+    // if (cached) return res.status(200).json(JSON.parse(cached));
 
     const transactionId = `txn_${uuid().split("-")[0]}`;
     const now = Date.now();
 
-    // deterministic behavior for testing
-    if (String(cardToken).toLowerCase().includes("fail")) {
-      const result = { success: false, transactionId, status: "failed", reason: "Card declined (simulated)" };
-      await redis.set(key, JSON.stringify(result), "EX", IDEMPOTENCY_TTL);
-      // publish failed event
-      await publishEvent("payment.failed", { orderId, transactionId, amount, reason: result.reason, timestamp: now });
-      return res.status(200).json(result);
+    // Create & confirm PaymentIntent
+    const paymentIntent = await stripe.paymentIntents.create(
+      {
+        amount: Math.round(amount * 100),
+        currency: "usd",
+        payment_method: paymentMethodId,
+        confirm: true,
+        payment_method_types: ["card"], // ✅ Only allow card payments
+        metadata: { orderId, userId, transactionId },
+      },
+      { idempotencyKey: key }
+    );
+
+    let result;
+
+    if (paymentIntent.status === "succeeded") {
+      result = { success: true, transactionId, stripeId: paymentIntent.id, status: "paid" };
+      await emit("payment.success", {
+        orderId,
+        transactionId,
+        stripeId: paymentIntent.id,
+        amount,
+        timestamp: now,
+      });
+    } 
+    else if (paymentIntent.status === "requires_action" || paymentIntent.status === "processing") {
+      return res.status(400).json({
+        success: false,
+        reason: "Payment requires additional authentication",
+        client_secret: paymentIntent.client_secret,
+      });
+    } 
+    else {
+      result = {
+        success: false,
+        transactionId,
+        stripeId: paymentIntent.id,
+        status: paymentIntent.status,
+        reason: paymentIntent.last_payment_error?.message || "Payment not completed",
+      };
+      await emit("payment.failed", {
+        orderId,
+        transactionId,
+        amount,
+        reason: result.reason,
+        timestamp: now,
+      });
     }
 
-    if (String(cardToken).toLowerCase().includes("async")) {
-      const pendingResult = { success: true, transactionId, status: "pending", note: "Processing asynchronously" };
-      await redis.set(key, JSON.stringify(pendingResult), "EX", IDEMPOTENCY_TTL);
-
-      // simulate async processing -> success later
-      setTimeout(async () => {
-        const success = { success: true, transactionId, status: "paid" };
-        await redis.set(key, JSON.stringify(success), "EX", IDEMPOTENCY_TTL);
-        try {
-          await publishEvent("payment.success", { orderId, transactionId, amount, timestamp: Date.now() });
-        } catch (err) {
-          console.error("Failed to publish async payment.success", err);
-        }
-      }, Number(process.env.ASYNC_PAYMENT_DELAY_MS || 3000));
-
-      return res.status(202).json(pendingResult);
-    }
-
-    // default immediate success
-    const success = { success: true, transactionId, status: "paid" };
-    await redis.set(key, JSON.stringify(success), "EX", IDEMPOTENCY_TTL);
-    await publishEvent("payment.success", { orderId, transactionId, amount, timestamp: now });
-
-    return res.status(200).json(success);
+    await redis.set(key, JSON.stringify(result), "EX", IDEMPOTENCY_TTL);
+    return res.status(200).json(result);
   } catch (err) {
-    console.error("Payment processing error:", err);
-    return res.status(500).json({ success: false, reason: err.message });
+    console.error("Stripe payment error:", err);
+
+    const reason =
+      err.type === "StripeCardError"
+        ? err.message
+        : err.raw?.message || err.message;
+
+    const failResult = {
+      success: false,
+      status: "failed",
+      reason,
+    };
+
+    await redis.set(key, JSON.stringify(failResult), "EX", IDEMPOTENCY_TTL);
+    await emit("payment.failed", {
+      orderId,
+      amount,
+      reason,
+      timestamp: Date.now(),
+    });
+
+    return res.status(400).json(failResult); // ✅ 400 means "client error" (bad card, etc.)
   }
 }
 
-async function webhookHandler(req, res) {
-  const signature = req.headers["x-webhook-signature"];
-  const secret = process.env.WEBHOOK_SECRET || "webhook_secret_demo";
-  const payload = req.body;
-  // signature check omitted for brevity — implement HMAC verify as earlier
-  const { event, data } = payload;
-  if (!event || !data) return res.status(400).json({ success: false, reason: "event/data required" });
+
+async function processPaymentHandler_OLD(req, res) {
+  const { orderId, amount, userId, paymentMethodId, idempotencyKey } = req.body;
+
+  if (!orderId || !amount || !paymentMethodId)
+    return res.status(400).json({ success: false, reason: "orderId, amount, and paymentMethodId required" });
+
+  const key = `idempotency:${idempotencyKey || `${orderId}:${paymentMethodId}`}`;
+  console.log("[Stripe] Processing payment for", orderId, "using", paymentMethodId);
 
   try {
-    if (event === "payment.succeeded" || event === "payment.success") {
-      await publishEvent("payment.success", data);
-    } else if (event === "payment.failed") {
-      await publishEvent("payment.failed", data);
-    } else {
-      await publishEvent(event, data);
+    const cached = await redis.get(key);
+    if (cached) return res.status(200).json(JSON.parse(cached));
+
+    const transactionId = `txn_${uuid().split("-")[0]}`;
+    const now = Date.now();
+
+    // 🔹 Create & confirm PaymentIntent using existing payment method
+    const paymentIntent = await stripe.paymentIntents.create(
+      {
+        amount: Math.round(amount * 100),
+        currency: "usd",
+        payment_method: paymentMethodId,
+        confirm: true,
+        metadata: { orderId, userId, transactionId },
+        payment_method_types: ["card"], // 🔹 only accept cards
+      },
+      { idempotencyKey: key }
+    );
+    // automatic_payment_methods: {
+    //   enabled: true,
+    //   allow_redirects: "never",
+    // },
+    // console.log(paymentIntent, paymentMethodId);
+    
+
+    let result;
+
+    if (paymentIntent.status === "succeeded") {
+      result = { success: true, transactionId, stripeId: paymentIntent.id, status: "paid" };
+      await emit("payment.success", {
+        orderId,
+        transactionId,
+        amount,
+        stripeId: paymentIntent.id,
+        timestamp: now,
+      });
+    } 
+    else if (paymentIntent.status === "requires_action" || paymentIntent.status === "processing") {
+      // Payment needs 3DS authentication, etc.
+      return res.status(400).json({
+        success: false,
+        reason: "Payment requires additional authentication",
+        client_secret: paymentIntent.client_secret,
+      });
     }
-    return res.json({ success: true });
+    else {
+      result = {
+        success: false,
+        transactionId,
+        status: paymentIntent.status,
+        reason: paymentIntent.last_payment_error?.message || "Payment not completed",
+      };
+      await emit("payment.failed", {
+        orderId,
+        transactionId,
+        amount,
+        reason: result.reason,
+        timestamp: now,
+      });
+    }
+
+    await redis.set(key, JSON.stringify(result), "EX", IDEMPOTENCY_TTL);
+    return res.status(200).json(result);
   } catch (err) {
-    console.error("Webhook publish error:", err);
-    return res.status(500).json({ success: false, reason: err.message });
+    console.error("Stripe payment error:", err);
+     // Stripe-specific error response
+     const reason =
+     err.type === "StripeCardError"
+       ? err.message
+       : err.raw?.message || err.message;
+    const failResult = {
+      success: false,
+      status: "failed",
+      reason: reason,
+    };
+
+    await redis.set(key, JSON.stringify(failResult), "EX", IDEMPOTENCY_TTL);
+    await emit("payment.failed", {
+      orderId,
+      amount,
+      reason: reason,
+      timestamp: Date.now(),
+    });
+
+    return res.status(500).json(failResult);
   }
 }
 
-module.exports = { processPaymentHandler, webhookHandler };
+module.exports = { processPaymentHandler };

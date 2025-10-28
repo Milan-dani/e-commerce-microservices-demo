@@ -1,4 +1,4 @@
-// const { connectNATS, getCodec } = require("../message-broker/natsConnection");
+const Product = require("./models/Product");
 const registerServiceConsul = require("./serviceRegistry/registerService");
 const { emit } = require("./utils/eventEmitter");
 const {
@@ -11,17 +11,18 @@ const PORT = process.env.PORT || 3004;
 const CONSUL_URL = process.env.LOCAL_CONSUL_URL || "http://localhost:8500";
 const MESSAGE_BROKER_URL =
   process.env.MESSAGE_BROKER_URL || "http://localhost:3009";
-const SERVICE_NAME = process.env.SERVICE_NAME || "payments";
+const SERVICE_NAME = process.env.SERVICE_NAME || "orders";
 
 // const SERVICE_NAME = "analytics-service";
 const STREAM = "ECOM_EVENTS";
 const SUBSCRIBED_TOPICS = [
-  "order.created",
-  "order.updated",
-  "order.completed",
-  "order.status.updated",
-  "payment.success",
-  "payment.failed",
+  "order.paid",
+  "product.created",
+  "product.updated",
+  "product.deleted",
+  "product.decremented",
+  "inventory.low",
+  "product.viewed",
 ];
 
 // Helper: perform a JSON POST request using fetch
@@ -71,29 +72,6 @@ async function registerService() {
 }
 
 // Start listening to NATS topics
-async function startListening_Old() {
-  const nc = await connectNATS();
-  const codec = getCodec();
-
-  for (const subject of SUBSCRIBED_TOPICS) {
-    const sub = nc.subscribe(subject);
-    console.log(`📡 Subscribed to event: ${subject}`);
-
-    (async () => {
-      for await (const msg of sub) {
-        const data = codec.decode(msg.data);
-        console.log(`📥 [${subject}] Event received:`, data);
-
-        await Event.create({
-          event: subject,
-          source: data.source || "unknown",
-          payload: data,
-        });
-      }
-    })();
-  }
-}
-
 async function startListening() {
   await connectNats();
   await ensureStream(STREAM, SUBSCRIBED_TOPICS);
@@ -125,26 +103,54 @@ async function justConnectNATS() {
 // function to recieve and process events
 async function setupEventSubscriptions() {
   await subscribeEvent(
-    "payment.success",
+    "order.paid",
     async (data) => {
       console.log(`✅ Payment successful for Order ${data.orderId}`);
-      await emit("order.completed", {
-        orderId: data.orderId,
-        timestamp: new Date().toISOString(),
-      });
-    },
-    { jetstream: true }
-  );
 
-  await subscribeEvent(
-    "payment.failed",
-    async (data) => {
-      console.log(`❌ Payment failed for Order ${data.orderId}`);
-      await emit("order.status.updated", {
-        orderId: data.orderId,
-        status: "PAYMENT_FAILED",
-        reason: data.reason,
-      });
+      try {
+        const updatedProducts = [];
+
+        for (const item of data.items) {
+          const { productId, quantity } = item;
+
+          // Try to decrement atomically and only if enough stock
+          const product = await Product.findOneAndUpdate(
+            { _id: productId, quantity: { $gte: quantity } },
+            { $inc: { quantity: -quantity } },
+            { new: true }
+          );
+
+          if (!product) {
+            console.warn(
+              `⚠️ Product ${productId} not found or not enough stock for order ${data.orderId}`
+            );
+            continue;
+          }
+
+          updatedProducts.push({
+            productId,
+            remainingQuantity: product.quantity,
+            decrementedBy: quantity,
+          });
+        }
+
+        if (updatedProducts.length > 0) {
+          console.log(
+            `✅ Updated stock for ${updatedProducts.length} products in Order ${data.orderId}`
+          );
+
+          await emit("product.decremented", {
+            orderId: data.orderId,
+            updatedProducts,
+            timestamp: new Date().toISOString(),
+          });
+        }
+      } catch (err) {
+        console.error(
+          `❌ Failed to update Product Quantity for ${data.orderId}:`,
+          err.message
+        );
+      }
     },
     { jetstream: true }
   );

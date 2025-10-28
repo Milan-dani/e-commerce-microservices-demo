@@ -56,6 +56,7 @@ const Order = sequelize.define("Order", {
     type: DataTypes.ENUM(
       "pending",
       "paid",
+      "failed",
       "processing",
       "shipped",
       "delivered",

@@ -186,78 +186,200 @@ app.patch("/checkout/:orderId/payment", authenticate, async (req, res) => {
 
 //   res.json(order);
 // });
+
+
+
 app.post("/checkout/:orderId/place", authenticate, async (req, res) => {
   const { id: userId } = req.user;
   const { orderId } = req.params;
 
-  const order = await Order.findOne({ where: { id: orderId, userId } });
-  if (!order) return res.status(404).json({ error: "Order not found" });
+  try {
+    // 1️⃣ Fetch order
+    const order = await Order.findOne({ where: { id: orderId, userId } });
+    if (!order) return res.status(404).json({ error: "Order not found" });
 
-  // Call Payment-Service microservice
-  // const paymentResult = await post("payments", "/process", {
-  //   amount: order.total,
-  //   cardToken: order.paymentInfo.cardToken,
-  // });
+    // 2️⃣ Basic validation
+    if (!order.paymentInfo || !order.paymentInfo.id)
+      return res.status(400).json({ error: "Missing payment method" });
 
-  //  const paymentResultX = await post("payments", "/process", {
-  //   orderId: order.id,
-  //   amount: order.total,
-  //   cardToken: order.paymentInfo.cardToken,
-  //   userId: order.userId,
-  //   idempotencyKey: order.id // or a dedicated key
-  // });
-  // const {status : remoteStatus, data} = await post("payments", "/process", {
-  //   orderId: order.id,
-  //   amount: order.total,
-  //   cardToken: order.paymentInfo.cardToken,
-  //   userId: order.userId,
-  //   idempotencyKey: order.id // or a dedicated key
-  // });
-  // if (remoteStatus === 200 || remoteStatus === 201) {
-  //   // immediate result
-  //   if (data.success && data.status === "paid") {
-  //     order.paymentInfo = { ...order.paymentInfo, status: "paid", transactionId: data.transactionId };
-  //     order.status = "paid";
-  //   } else {
-  //     order.paymentInfo = { ...order.paymentInfo, status: data.status || "failed", reason: data.reason };
-  //     order.status = "pending";
-  //   }
-  //   await order.save();
-  //   return res.json(order);
-  // }
+    // 3️⃣ Call Payment Service
+    let paymentResult;
+    // try {
+    //   paymentResult = await post("payments", "/process", {
+    //     orderId: order.id,
+    //     amount: order.total,
+    //     userId: order.userId,
+    //     paymentMethodId: order.paymentInfo.id, // pm_xxx from Stripe
+    //     idempotencyKey: `order-${order.id}`,
+    //   });
+    // } catch (err) {
+    //   console.error("Payment Service unavailable:", err.message);
+    //   // Graceful degradation: keep order pending, let retry/cron handle
+    //   order.paymentInfo.status = "pending";
+    //   order.paymentInfo.reason = "Payment service unavailable";
+    //   order.status = "pending";
+    //   await order.save();
+    //   return res.status(503).json({
+    //     success: false,
+    //     message: "Payment service unavailable, order kept pending",
+    //   });
+    // }
+    try {
+      paymentResult = await post("payments", "/process", {
+        orderId: order.id,
+        amount: order.total,
+        userId: order.userId,
+        paymentMethodId: order.paymentInfo.id,
+        idempotencyKey: `order-${order.id}`,
+      });
+    } catch (err) {
+      if (err.status && err.status < 500) {
+        // ⚠️ Payment failed due to user/card issue, NOT service down
+        console.warn("Payment failed (user/card issue):", err.message);
+    
+        order.paymentInfo.status = "failed";
+        order.paymentInfo.reason = err.response?.reason || err.message;
+        order.status = "failed";
+        await order.save();
+    
+        return res.status(400).json({
+          success: false,
+          message: err.response?.reason || "Payment failed",
+          order,
+        });
+      }
+    
+      // 🚨 Real service failure (network, consul, crash, etc.)
+      console.error("Payment Service unavailable:", err.message);
+      order.paymentInfo.status = "pending";
+      order.paymentInfo.reason = "Payment service unavailable";
+      order.status = "pending";
+      await order.save();
+      return res.status(503).json({
+        success: false,
+        message: "Payment service unavailable, order kept pending",
+      });
+    }
+    
 
-  // if (remoteStatus === 202) {
-  //   // accepted for async processing. Keep order pending; NATS will update when event published
-  //   order.paymentInfo = { ...order.paymentInfo, status: "pending", transactionId: data.transactionId || null };
-  //   order.status = "pending";
-  //   await order.save();
-  //   return res.status(202).json({ message: "Payment processing", order });
-  // }
+    // 4️⃣ Handle Payment Service response
+    if (paymentResult.success && paymentResult.status === "paid") {
+      order.paymentInfo.status = "paid";
+      order.paymentInfo.transactionId = paymentResult.transactionId;
+      order.status = "paid";
 
-  // // remoteStatus === 0 or other code => treat as error
-  // order.paymentInfo = { ...order.paymentInfo, status: "failed", reason: data.reason || "payment-service-unavailable" };
-  // order.status = "pending";
+      await order.save();
 
-  // //////////////////////////
-  const paymentResult = {
-    success: true,
-    transactionId: "328173923jsjcscy2y12739",
-    status: "paid",
-  };
+      // Publish "order.paid" for analytics/notifications/etc.
+      await emit("order.paid", {
+        orderId: order.id,
+        userId,
+        transactionId: paymentResult.transactionId,
+        amount: order.total,
+        items: order.items
+      });
 
-  if (paymentResult.success) {
-    order.paymentInfo.status = "paid";
-    order.paymentInfo.transactionId = paymentResult.transactionId;
-    order.status = "paid";
-  } else {
-    order.paymentInfo.status = "failed";
-    order.status = "pending";
-    order.paymentInfo.reason = paymentResult.reason;
+      return res.json({ success: true, order });
+    }
+
+    // Payment failed or pending
+    order.paymentInfo.status = paymentResult.status || "failed";
+    order.paymentInfo.reason = paymentResult.reason || "Payment not completed";
+    order.status = paymentResult.status === "pending" ? "pending" : "failed";
+
+    await order.save();
+
+    if (paymentResult.status === "pending") {
+      return res.status(202).json({
+        success: true,
+        message: "Payment pending. Awaiting Stripe confirmation.",
+        order,
+      });
+    }
+
+    return res.status(400).json({
+      success: false,
+      message: paymentResult.reason || "Payment failed",
+      order,
+    });
+  } catch (err) {
+    console.error("Checkout error:", err);
+    res.status(500).json({ success: false, message: err.message });
   }
-
-  await order.save();
-  res.json(order);
 });
+
+// app.post("/checkout/:orderId/place", authenticate, async (req, res) => {
+//   const { id: userId } = req.user;
+//   const { orderId } = req.params;
+
+//   const order = await Order.findOne({ where: { id: orderId, userId } });
+//   if (!order) return res.status(404).json({ error: "Order not found" });
+
+//   // Call Payment-Service microservice
+//   // const paymentResult = await post("payments", "/process", {
+//   //   amount: order.total,
+//   //   cardToken: order.paymentInfo.cardToken,
+//   // });
+
+//   //  const paymentResultX = await post("payments", "/process", {
+//   //   orderId: order.id,
+//   //   amount: order.total,
+//   //   cardToken: order.paymentInfo.cardToken,
+//   //   userId: order.userId,
+//   //   idempotencyKey: order.id // or a dedicated key
+//   // });
+//   // const {status : remoteStatus, data} = await post("payments", "/process", {
+//   //   orderId: order.id,
+//   //   amount: order.total,
+//   //   cardToken: order.paymentInfo.cardToken,
+//   //   userId: order.userId,
+//   //   idempotencyKey: order.id // or a dedicated key
+//   // });
+//   // if (remoteStatus === 200 || remoteStatus === 201) {
+//   //   // immediate result
+//   //   if (data.success && data.status === "paid") {
+//   //     order.paymentInfo = { ...order.paymentInfo, status: "paid", transactionId: data.transactionId };
+//   //     order.status = "paid";
+//   //   } else {
+//   //     order.paymentInfo = { ...order.paymentInfo, status: data.status || "failed", reason: data.reason };
+//   //     order.status = "pending";
+//   //   }
+//   //   await order.save();
+//   //   return res.json(order);
+//   // }
+
+//   // if (remoteStatus === 202) {
+//   //   // accepted for async processing. Keep order pending; NATS will update when event published
+//   //   order.paymentInfo = { ...order.paymentInfo, status: "pending", transactionId: data.transactionId || null };
+//   //   order.status = "pending";
+//   //   await order.save();
+//   //   return res.status(202).json({ message: "Payment processing", order });
+//   // }
+
+//   // // remoteStatus === 0 or other code => treat as error
+//   // order.paymentInfo = { ...order.paymentInfo, status: "failed", reason: data.reason || "payment-service-unavailable" };
+//   // order.status = "pending";
+
+//   // //////////////////////////
+//   const paymentResult = {
+//     success: true,
+//     transactionId: "328173923jsjcscy2y12739",
+//     status: "paid",
+//   };
+
+//   if (paymentResult.success) {
+//     order.paymentInfo.status = "paid";
+//     order.paymentInfo.transactionId = paymentResult.transactionId;
+//     order.status = "paid";
+//   } else {
+//     order.paymentInfo.status = "failed";
+//     order.status = "pending";
+//     order.paymentInfo.reason = paymentResult.reason;
+//   }
+
+//   await order.save();
+//   res.json(order);
+// });
 
 // GET all orders for logged-in user
 app.get("/", authenticate, async (req, res) => {
@@ -496,6 +618,7 @@ app.patch(
     const validStatuses = [
       "pending",
       "paid",
+      "failed",
       "processing",
       "shipped",
       "delivered",
@@ -511,14 +634,15 @@ app.patch(
     order.status = status;
     await order.save();
 
-    if (status === "fulfilled") {
-      // Decrement stock via Product service
-      for (const item of order.items) {
-        await post("products", `/${item.productId}/decrement`, {
-          quantity: item.quantity,
-        });
-      }
-    }
+    // if (status === "fulfilled") {
+    //   // Decrement stock via Product service
+    //   for (const item of order.items) {
+    //     await post("products", `/${item.productId}/decrement`, {
+    //       quantity: item.quantity,
+    //     });
+    //   }
+    // }
+    // ^ commenting decrement logic, because now it's been handled via NATS message broker.
 
     // Emit event to NATS
     await emit("order.status.updated", {
@@ -674,6 +798,7 @@ async function startServer() {
     // registerEvents();
     // startSubscriber();
     await registerService().then(justConnectNATS);
+    await new Promise(r => setTimeout(r, 500)); // small delay helps stabilize connection
     await drainOutbox();
     await setupEventSubscriptions();
   });

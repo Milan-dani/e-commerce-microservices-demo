@@ -4,8 +4,8 @@ const express = require('express');
 const { processPaymentHandler, webhookHandler } = require("./controllers/payments");
 const { getNats } = require("./nats/publisher");
 const redis = require("./utils/redisClient");
-const { registerService, justConnectNATS } = require("./subscriber");
-const { drainOutbox } = require("./utils/eventEmitter");
+const { registerService, justConnectNATS, setupEventSubscriptions } = require("./subscriber");
+const { drainOutbox, emit } = require("./utils/eventEmitter");
 
 const app = express();
 app.use(express.json());
@@ -42,7 +42,17 @@ app.post("/process", processPaymentHandler);
  * Generic webhook receiver (e.g., from a real payment gateway)
  * Expects signature header: `x-webhook-signature`
  */
-app.post("/webhook", webhookHandler);
+// app.post("/webhook", webhookHandler);
+
+app.post('/processX', async (req, res) => {
+  const { orderId, amount } = req.body;
+  await emit("payment.success", {
+    orderId,
+   
+    amount,
+  });
+  res.json({ status: 'success', orderId });
+})
 
 // Simulate payment processing
 app.post('/payments/process', (req, res) => {
@@ -71,4 +81,5 @@ app.listen(PORT, async() => {
   console.log(`Payment Service running on port ${PORT}`);
   await registerService().then(justConnectNATS);
   await drainOutbox();
+  // await setupEventSubscriptions();
 });

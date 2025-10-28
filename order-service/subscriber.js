@@ -1,4 +1,5 @@
 // const { connectNATS, getCodec } = require("../message-broker/natsConnection");
+const Order = require("./models/Order");
 const registerServiceConsul = require("./serviceRegistry/registerService");
 const { emit } = require("./utils/eventEmitter");
 const {
@@ -19,6 +20,7 @@ const SUBSCRIBED_TOPICS = [
   "order.created",
   "order.updated",
   "order.completed",
+  "order.paid",
   "order.status.updated",
   "payment.success",
   "payment.failed",
@@ -128,7 +130,38 @@ async function setupEventSubscriptions() {
     "payment.success",
     async (data) => {
       console.log(`✅ Payment successful for Order ${data.orderId}`);
-      await emit("order.completed", {
+
+      try {
+        // await updateOrderPaymentStatus(data.orderId, "PAID");
+        //  await Order.update(
+        //   {
+        //     paymentStatus: 'paid',
+        //     paymentFailureReason: data?.reason,
+        //     updatedAt: new Date(),
+        //   },
+        //   {
+        //     where: { id: data.orderId },
+        //   }
+        // );
+        const order = await Order.findByPk(data.orderId);
+        if (order && order.status !== "paid") {
+          order.status = "paid";
+          order.paymentInfo.status = "paid";
+          order.paymentInfo.transactionId = data.transactionId;
+          await order.save();
+        }
+      } catch (err) {
+        console.error(
+          `Failed to update payment status for ${data.orderId}:`,
+          err
+        );
+      }
+
+      // await emit("order.completed", {
+      //   orderId: data.orderId,
+      //   timestamp: new Date().toISOString(),
+      // });
+      await emit("order.paid", {
         orderId: data.orderId,
         timestamp: new Date().toISOString(),
       });
@@ -140,6 +173,33 @@ async function setupEventSubscriptions() {
     "payment.failed",
     async (data) => {
       console.log(`❌ Payment failed for Order ${data.orderId}`);
+      // Update DB
+      try {
+        // await updateOrderPaymentStatus(data.orderId, "PAYMENT_FAILED", data.reason);
+        // await Order.update(
+        //   {
+        //     paymentStatus: 'failed',
+        //     paymentFailureReason: data?.reason,
+        //     updatedAt: new Date(),
+        //   },
+        //   {
+        //     where: { id: data.orderId },
+        //   }
+        // );
+        const order = await Order.findByPk(data.orderId);
+        if (order && order.status !== "paid") {
+          order.status = "failed";
+          order.paymentInfo.status = "failed";
+          order.paymentInfo.reason = data.reason;
+          await order.save();
+        }
+      } catch (err) {
+        console.error(
+          `Failed to update payment status for ${data.orderId}:`,
+          err
+        );
+      }
+
       await emit("order.status.updated", {
         orderId: data.orderId,
         status: "PAYMENT_FAILED",

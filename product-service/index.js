@@ -7,8 +7,14 @@ const fs = require("fs");
 const path = require("path");
 const upload = require("./middleware/upload");
 const Product = require("./models/Product");
-const registerService = require("./serviceRegistry/registerService");
+// const registerService = require("./serviceRegistry/registerService");
 const { authenticate, requireAdmin } = require("./middleware/authMiddleware");
+const {
+  registerService,
+  justConnectNATS,
+  setupEventSubscriptions,
+} = require("./subscriber");
+const { drainOutbox, emit } = require("./utils/eventEmitter");
 
 const app = express();
 app.use(express.json());
@@ -72,6 +78,9 @@ app.post(
       };
 
       const product = await Product.create(productData);
+      await emit("product.created", {
+        productId: product?.id || "",
+      });
       res.status(201).json(product);
     } catch (err) {
       console.error(err);
@@ -361,14 +370,14 @@ app.get("/products", async (req, res) => {
     //   });
     // }, 10000);
     // Regular user response
-      return res.json({
-        role: "user",
-        page: pageNumber,
-        limit: limitNumber,
-        total,
-        totalPages: Math.ceil(total / limitNumber),
-        products,
-      });
+    return res.json({
+      role: "user",
+      page: pageNumber,
+      limit: limitNumber,
+      total,
+      totalPages: Math.ceil(total / limitNumber),
+      products,
+    });
   } catch (err) {
     console.error("Product Fetch Error:", err);
     res.status(500).json({ message: "Server error" });
@@ -393,6 +402,10 @@ app.get("/products/:id", async (req, res) => {
   if (product.image) {
     product.image = getFullImageUrl(req, product.image);
   }
+  // emiting event for Recomenation service via NATS
+  await emit("product.viewed", {
+    productId: product.id || req.params.id,
+  });
   res.json(product);
 });
 
@@ -460,6 +473,11 @@ app.put(
       });
 
       await product.save();
+      // 
+      await emit("product.updated", {
+        productId: product.id || req.params.id,
+      });
+
       res.json(product);
     } catch (err) {
       console.error(err);
@@ -486,7 +504,9 @@ app.delete("/products/:id", authenticate, requireAdmin, async (req, res) => {
 
     // Delete product from database
     await Product.findByIdAndDelete(req.params.id);
-
+    await emit("product.deleted", {
+      productId: product.id || req.params.id,
+    });
     res.json({ message: "Product deleted successfully" });
   } catch (err) {
     console.error("Delete product failed:", err);
@@ -532,8 +552,12 @@ app.get("/health", (req, res) => {
 mongoose
   .connect(MONGO_URI)
   .then(() => {
-    app.listen(PORT, () => {
+    app.listen(PORT, async () => {
       console.log(`Product Service running on port ${PORT}`);
+      await registerService().then(justConnectNATS);
+      await new Promise((r) => setTimeout(r, 500)); // small delay helps stabilize connection
+      await drainOutbox();
+      await setupEventSubscriptions();
     });
   })
   .catch((err) => console.error("MongoDB connection error:", err));

@@ -3,6 +3,7 @@ const fs = require("fs");
 const path = require("path");
 
 const OUTBOX_FILE = path.join(process.cwd(), "outbox.json");
+const SERVICE_NAME = process.env.SERVICE_NAME || "payments";
 
 function readOutbox() {
   if (!fs.existsSync(OUTBOX_FILE)) return [];
@@ -18,14 +19,17 @@ function writeOutbox(list) {
 }
 
 async function emit(subject, payload, opts = { jetstream: true, retries: 3 }) {
+  console.log(SERVICE_NAME);
+  
+  const enrichedPayload = {
+    ...payload,
+    timestamp: new Date().toISOString(),
+    source: SERVICE_NAME,
+  };
   let attempts = 0;
   while (attempts < opts.retries) {
     try {
-      const enrichedPayload = {
-        ...payload,
-        timestamp: new Date().toISOString(),
-        source: SERVICE_NAME,
-      };
+     
       // await publishEvent(subject, payload, opts);
       await publishEvent(subject, enrichedPayload, opts);
       return;
