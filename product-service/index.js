@@ -51,7 +51,7 @@ const adminAuth = (req, res, next) => {
     return res.status(401).json({ message: "Invalid token" });
   }
 };
-function getFullImageUrl(req, imagePath) {
+function getFullImageUrl_OLD(req, imagePath) {
   if (!imagePath) return null;
 
   // Only prepend host if it's a relative path starting with /uploads
@@ -62,6 +62,16 @@ function getFullImageUrl(req, imagePath) {
   // Already a full URL, return as-is
   return imagePath;
 }
+function getFullImageUrl(req, imagePath) {
+  if (!imagePath) return null;
+
+  // Always return relative to the product service root
+  if (imagePath.startsWith("/uploads")) {
+    return `/products${imagePath}`; // so API Gateway proxies it correctly
+  }
+
+  return imagePath;
+} // created for Docker , returns "image": "/products/uploads/1760009004398.jpg"
 
 // CRUD endpoints
 

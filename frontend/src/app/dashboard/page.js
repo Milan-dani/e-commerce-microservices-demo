@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { motion } from "framer-motion";
 import Link from "next/link";
 import {
@@ -22,17 +22,63 @@ import {
   CheckCircle,
 } from "lucide-react";
 import Button from "@/components/Button";
+import OrderHistoryTable from "@/components/dashboardComponents/user/OrderHistoryTable";
+import { useListOrdersQuery } from "@/api/services/orderApi";
+import { getStatusColor } from "@/utils/statusHelpers";
+import Cookies from "js-cookie";
 
 export default function Dashboard() {
+  // Orders Fetching
+  const [orders, setOrders] = useState([]);
+  const [filters, setFilters] = useState({
+    page: 1,
+    limit: 10,
+    status: "all",
+  });
+  const [totalPages, setTotalPages] = useState(1);
+  const [totalOrders, setTotalOrders] = useState(0);
+  const [totalSpent, setTotalSpent] = useState(0);
+  const {
+    data,
+    isLoading: or,
+    isError,
+  } = useListOrdersQuery({
+    page: filters.page,
+    limit: filters.limit,
+    status: filters.status,
+  });
+  useEffect(() => {
+    if (data) {
+      setOrders(data.orders);
+      setTotalPages(data.totalPages);
+      setTotalOrders(data.total);
+      // const total
+      setTotalSpent(data.orders.reduce((sum, order) => sum + order.total, 0));
+    }
+  }, [data]);
+  const updateFilter = (key, value) => {
+    setFilters((prev) => ({
+      ...prev,
+      [key]: value,
+      page: key === "page" ? value : 1, // reset page on any filter change except page
+    }));
+  };
+
   const [activeTab, setActiveTab] = useState("overview");
 
-  const user = {
+  const defaultUser = {
     name: "John Doe",
     email: "john.doe@example.com",
     memberSince: "January 2024",
     totalOrders: 12,
     totalSpent: 1250.5,
   };
+
+
+  const userFromCookies = Cookies.get("user") ? JSON.parse(Cookies.get("user")) : null;
+  const user = userFromCookies || { ...defaultUser };
+  console.log(user);
+  
 
   const recentOrders = [
     {
@@ -117,7 +163,8 @@ export default function Dashboard() {
           className="mb-8"
         >
           <h1 className="text-3xl font-bold text-gray-900">My Dashboard</h1>
-          <p className="text-gray-600 mt-2">Welcome back, {user.name}!</p>
+          {/* <p className="text-gray-600 mt-2">Welcome back, {user.name}!</p> */}
+          <p className="text-gray-600 mt-2">Welcome back, {user.firstName}!</p>
         </motion.div>
 
         <div className="grid grid-cols-1 lg:grid-cols-4 gap-8">
@@ -132,14 +179,19 @@ export default function Dashboard() {
               <div className="flex items-center gap-4 mb-6">
                 <div className="w-12 h-12 bg-blue-600 rounded-full flex items-center justify-center">
                   <span className="text-white font-bold text-lg">
-                    {user.name
+                    {/* {user.name
                       .split(" ")
                       .map((n) => n[0])
-                      .join("")}
+                      .join("")} */}
+                      {/* {user.firstName[0].toUpperCase()}{user.lastName[0].toUpperCase()} */}
+                      {`${user?.firstName?.[0]?.toUpperCase() ?? ""}${user?.lastName?.[0]?.toUpperCase() ?? ""}`}
+
                   </span>
                 </div>
                 <div>
-                  <h3 className="font-semibold text-gray-900">{user.name}</h3>
+                  {/* <h3 className="font-semibold text-gray-900">{user.name}</h3> */}
+                  <h3 className="font-semibold text-gray-900">{user.firstName}{" "}{user.lastName}</h3>
+                  {/* <p className="text-sm text-gray-600">{user.email}</p> */}
                   <p className="text-sm text-gray-600">{user.email}</p>
                 </div>
               </div>
@@ -187,7 +239,8 @@ export default function Dashboard() {
                           Total Orders
                         </p>
                         <p className="text-2xl font-bold text-gray-900">
-                          {user.totalOrders}
+                          {/* {user.totalOrders} */}
+                          {totalOrders}
                         </p>
                       </div>
                       <Package className="w-8 h-8 text-blue-600" />
@@ -201,7 +254,7 @@ export default function Dashboard() {
                           Total Spent
                         </p>
                         <p className="text-2xl font-bold text-gray-900">
-                          ${user.totalSpent}
+                          {/* ${user.totalSpent} */}${totalSpent}
                         </p>
                       </div>
                       <CreditCard className="w-8 h-8 text-green-600" />
@@ -300,7 +353,7 @@ export default function Dashboard() {
 
                   {/* Orders List */}
                   <div className="space-y-4">
-                    {recentOrders.map((order, index) => (
+                    {orders?.slice(0, 3)?.map((order, index) => (
                       <motion.div
                         key={order.id}
                         initial={{ opacity: 0, x: -20 }}
@@ -317,10 +370,10 @@ export default function Dashboard() {
                             </div>
                             <div>
                               <h3 className="font-medium text-gray-900">
-                                {order.id}
+                                {order.orderNumber}
                               </h3>
                               <p className="text-sm text-gray-600">
-                                {order.date}
+                                {order?.createdAt?.split("T")?.[0] ?? "Unknown date"}
                               </p>
                             </div>
                           </div>
@@ -331,13 +384,20 @@ export default function Dashboard() {
                               ${order.total}
                             </p>
                             <p className="text-sm text-gray-600">
-                              {order.items} items
+                              {order.items.length} items
                             </p>
                           </div>
 
                           {/* Bottom: Status + View */}
                           <div className="flex items-center justify-between">
                             <span
+                              className={`px-2 py-1 rounded-full text-xs font-medium ${getStatusColor(
+                                order.status
+                              )}`}
+                            >
+                             {order.status}
+                            </span>
+                            {/* <span
                               className={`px-2 py-1 rounded-full text-xs font-medium ${
                                 order.status === "Delivered"
                                   ? "bg-green-100 text-green-800"
@@ -347,10 +407,12 @@ export default function Dashboard() {
                               }`}
                             >
                               {order.status}
-                            </span>
-                            <button className="p-2 text-gray-400 hover:text-gray-600">
-                              <Eye className="w-4 h-4" />
-                            </button>
+                            </span> */}
+                            <Link href={`/orders/${order.id}`}>
+                              <button className="p-2 text-gray-400 hover:text-gray-600">
+                                <Eye className="w-4 h-4" />
+                              </button>
+                            </Link>
                           </div>
                         </div>
 
@@ -363,10 +425,10 @@ export default function Dashboard() {
                             </div>
                             <div>
                               <h3 className="font-medium text-gray-900">
-                                {order.id}
+                                {order.orderNumber}
                               </h3>
                               <p className="text-sm text-gray-600">
-                                {order.date}
+                                {order?.createdAt?.split("T")?.[0] ?? "Unknown date"}
                               </p>
                             </div>
                           </div>
@@ -377,26 +439,22 @@ export default function Dashboard() {
                               ${order.total}
                             </p>
                             <p className="text-sm text-gray-600">
-                              {order.items} items
+                              {order.items.length} items
                             </p>
                           </div>
 
                           {/* Right: Status + Action */}
                           <div className="flex items-center gap-2">
                             <span
-                              className={`px-2 py-1 rounded-full text-xs font-medium ${
-                                order.status === "Delivered"
-                                  ? "bg-green-100 text-green-800"
-                                  : order.status === "Shipped"
-                                  ? "bg-blue-100 text-blue-800"
-                                  : "bg-yellow-100 text-yellow-800"
-                              }`}
+                              className={`px-2 py-1 rounded-full text-xs font-medium ${getStatusColor(order.status)}`}
                             >
                               {order.status}
                             </span>
-                            <button className="p-2 text-gray-400 hover:text-gray-600">
-                              <Eye className="w-4 h-4" />
-                            </button>
+                            <Link href={`/orders/${order.id}`}>
+                              <button className="p-2 text-gray-400 hover:text-gray-600">
+                                <Eye className="w-4 h-4" />
+                              </button>
+                            </Link>
                           </div>
                         </div>
                       </motion.div>
@@ -418,8 +476,10 @@ export default function Dashboard() {
                   <h2 className="text-xl font-semibold text-gray-900 mb-6">
                     Order History
                   </h2>
-
-                  <div className="overflow-x-auto">
+                  <OrderHistoryTable
+                    {...{ totalOrders, totalPages, orders, filters, updateFilter }}
+                  />
+                  <div className="overflow-x-auto hidden">
                     <table className="w-full">
                       <thead>
                         <tr className="border-b border-gray-200">
@@ -758,7 +818,7 @@ export default function Dashboard() {
                       </label>
                       <input
                         type="text"
-                        defaultValue={user.name}
+                        defaultValue={`${user.firstName} ${user.lastName}`}
                         className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-gray-900 placeholder-gray-400"
                       />
                     </div>

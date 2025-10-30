@@ -1,90 +1,107 @@
 "use client";
-import React, { createContext, useContext, useEffect, useState } from "react";
-
-// simple helpers for cookies
-const setCookie = (name, value, days = 7) => {
-  const expires = new Date();
-  expires.setTime(expires.getTime() + days * 24 * 60 * 60 * 1000);
-  document.cookie = `${name}=${encodeURIComponent(
-    value
-  )};expires=${expires.toUTCString()};path=/`;
-};
-
-const getCookie = (name) => {
-  const match = document.cookie.match(
-    new RegExp("(^| )" + name + "=([^;]+)")
-  );
-  return match ? decodeURIComponent(match[2]) : null;
-};
-
-const deleteCookie = (name) => {
-  document.cookie = `${name}=;expires=Thu, 01 Jan 1970 00:00:00 UTC;path=/`;
-};
-
-const AuthContext = createContext(undefined);
+import { usePathname, useRouter } from "next/navigation";
+import { useDispatch, useSelector } from "react-redux";
+import { useEffect, useState } from "react";
+import Cookies from "js-cookie";
+import { setUser } from "@/store/slices/authSlice";
 
 export const AuthProvider = ({ children }) => {
-  const [user, setUser] = useState(null);
-  const [token, setToken] = useState(null);
-
+  const router = useRouter();
+  const pathname = usePathname();
+  const dispatch = useDispatch();
+  const { user } = useSelector((state) => state.auth);
+  // const user = Cookies.get('user') ? JSON.parse(Cookies.get('user')) : null;
+  // const token = Cookies.get('token') ? JSON.parse(Cookies.get('user')) : null;
+  // console.log(user);
+  const [loading, setLoading] = useState(true);
   useEffect(() => {
-    // Try cookies first, fallback to localStorage
-    const storedToken =
-      typeof window !== "undefined"
-        ? getCookie("token") || localStorage.getItem("token")
-        : null;
-    const storedUser =
-      typeof window !== "undefined"
-        ? getCookie("user") || localStorage.getItem("user")
-        : null;
+    console.log({user});
+    
+    // 🔹 Try to recover user from localStorage if Redux is empty
+    if (!user) {
+      const storedUser = JSON.parse(localStorage.getItem("user") || null);
+      console.log(storedUser);
 
-    if (storedToken && storedUser) {
-      setToken(storedToken);
-      try {
-        setUser(JSON.parse(storedUser));
-      } catch {
-        setUser(null);
+      if (storedUser) {
+        try {
+          // const parsedUser = JSON.parse(storedUser);
+          // dispatch(setUser(parsedUser));
+          dispatch(setUser(storedUser));
+        } catch (err) {
+          console.error("Failed to parse user from localStorage:", err);
+          // localStorage.removeItem("user");
+        }
       }
     }
-  }, []);
+  }, [user, dispatch]);
 
-  const login = (newToken, newUser) => {
-    setToken(newToken);
-    setUser(newUser);
+  useEffect(() => {
+    if (!pathname) return; // Safety check
 
-    // Save to cookies
-    setCookie("token", newToken, 7); // 7-day expiry
-    setCookie("user", JSON.stringify(newUser), 7);
+    const publicRoutes = [
+      "/",
+      "/about",
+      "/contact",
+      "/products",
+      "/login",
+      "/signup",
+    ];
 
-    // Also keep in localStorage as fallback
-    localStorage.setItem("token", newToken);
-    localStorage.setItem("user", JSON.stringify(newUser));
-  };
+    const userProtectedPrefixes = [
+      "/cart",
+      "/orders",
+      "/checkout",
+      "/dashboard",
+    ];
+    const adminProtectedPrefixes = ["/admin", "/admin"];
 
-  const logout = () => {
-    setToken(null);
-    setUser(null);
+    const isUserProtected = userProtectedPrefixes.some((route) =>
+      pathname.startsWith(route)
+    );
+    const isAdminProtected = adminProtectedPrefixes.some((route) =>
+      pathname.startsWith(route)
+    );
 
-    // Remove from cookies
-    deleteCookie("token");
-    deleteCookie("user");
+    const handleRedirects = () => {
+      // ⛔ Not logged in & accessing protected route
+      if (!user && (isUserProtected || isAdminProtected)) {
+        router.replace("/login");
+        return;
+      }
 
-    // Remove from localStorage
-    localStorage.removeItem("token");
-    localStorage.removeItem("user");
-  };
+      // 🚫 Logged in but not admin trying to access admin routes
+      if (user && user.role !== "admin" && isAdminProtected) {
+        router.replace("/dashboard");
+        
+        return;
+      }
 
-  return (
-    <AuthContext.Provider value={{ user, token, login, logout }}>
-      {children}
-    </AuthContext.Provider>
-  );
+      // 🔁 Logged in user visiting login/signup
+      if (user && ["/login", "/signup"].includes(pathname)) {
+        router.replace("/dashboard");
+        return;
+      }
+    };
+
+    handleRedirects();
+    setLoading(false);
+  }, [pathname, user, router]);
+
+  // 🌀 Show a loading screen while checking auth
+  if (loading) {
+    return (
+      <div
+        style={{
+          display: "flex",
+          justifyContent: "center",
+          alignItems: "center",
+          height: "100vh",
+          fontSize: "1.2rem",
+        }}
+      >
+        Loading...
+      </div>
+    );
+  }
+  return children;
 };
-
-export const useAuth = () => {
-  const ctx = useContext(AuthContext);
-  if (!ctx) throw new Error("useAuth must be used within AuthProvider");
-  return ctx;
-};
-
-

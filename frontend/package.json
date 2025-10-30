@@ -9,11 +9,23 @@
     "lint": "eslint"
   },
   "dependencies": {
+    "@reduxjs/toolkit": "^2.9.0",
+    "@stripe/react-stripe-js": "^5.2.0",
+    "@stripe/stripe-js": "^8.1.0",
+    "@tailwindcss/line-clamp": "^0.4.4",
+    "axios": "^1.12.2",
+    "date-fns": "^4.1.0",
     "framer-motion": "^12.23.22",
+    "js-cookie": "^3.0.5",
     "lucide-react": "^0.544.0",
     "next": "15.5.4",
     "react": "19.1.0",
-    "react-dom": "19.1.0"
+    "react-date-range": "^2.0.1",
+    "react-dom": "19.1.0",
+    "react-hot-toast": "^2.6.0",
+    "react-redux": "^9.2.0",
+    "rechart": "^0.0.1",
+    "recharts": "^3.3.0"
   },
   "devDependencies": {
     "@eslint/eslintrc": "^3",

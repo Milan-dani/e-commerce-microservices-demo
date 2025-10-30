@@ -76,7 +76,7 @@ export default function About() {
               About Our Company
             </h1>
             <p className="text-xl text-blue-100 max-w-3xl mx-auto">
-              We're passionate about providing exceptional shopping experiences and connecting customers 
+              We&apos;re passionate about providing exceptional shopping experiences and connecting customers 
               with the products they love at unbeatable prices.
             </p>
           </motion.div>
@@ -131,7 +131,7 @@ export default function About() {
                 </p>
                 <p>
                   What began as a small team of passionate individuals has grown into a global platform 
-                  serving millions of customers worldwide. We've always believed that technology should 
+                  serving millions of customers worldwide. We&apos;ve always believed that technology should 
                   enhance human connections, not replace them.
                 </p>
                 <p>

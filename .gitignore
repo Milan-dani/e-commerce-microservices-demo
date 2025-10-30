@@ -63,3 +63,6 @@ test-service/
 
 # ignore resources folders
 uploads/
+
+# ignore backup zips
+*.zip

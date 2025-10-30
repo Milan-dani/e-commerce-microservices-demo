@@ -54,6 +54,9 @@ app.use("/test", async (req, res) => {
   console.log("OK");
   res.json({ message: "OK" });
 });
+app.use("/health", async (req, res) => {
+  res.json({ message: "OK" });
+});
 
 // // Proxy routes
 // app.use(

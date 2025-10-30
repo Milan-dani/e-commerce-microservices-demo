@@ -1,5 +1,8 @@
 require("dotenv").config();
 const express = require("express");
+const PDFDocument = require("pdfkit");
+const fs = require("fs");
+const path = require("path");
 // const bodyParser = require("body-parser");
 const { connectDB, sequelize } = require("./db/sequelize");
 // const registerService = require("./serviceRegistry/registerService");
@@ -271,6 +274,7 @@ app.post("/checkout/:orderId/place", authenticate, async (req, res) => {
       await order.save();
 
       // Publish "order.paid" for analytics/notifications/etc.
+      
       await emit("order.paid", {
         orderId: order.id,
         userId,
@@ -594,6 +598,182 @@ app.get("/:id", authenticate, async (req, res) => {
   });
   // res.json(order);
 });
+
+
+function formatMoney(n) {
+  return `$${Number(n || 0).toFixed(2)}`;
+}
+function formatDate(ts) {
+  if (!ts) return "";
+  const d = typeof ts === "number" ? new Date(ts * 1000) : new Date(ts);
+  return d.toLocaleString();
+}
+
+app.get("/:id/invoice", authenticate, async (req, res) => {
+  const { id: userId } = req.user;
+  const order = await Order.findOne({ where: { id: req.params.id, userId } });
+  if (!order) return res.status(404).json({ error: "Order not found" });
+  try {
+    // Create PDF
+    const doc = new PDFDocument({ size: "A4", margin: 50 });
+
+    // Stream PDF directly to response
+    res.setHeader("Content-Type", "application/pdf");
+    res.setHeader("Content-Disposition", `attachment; filename=invoice-${order.orderNumber}.pdf`);
+    doc.pipe(res);
+
+    // ===== Header =====
+    const logoPath = path.resolve(process.cwd(), "public", "logo.png");
+    try {
+      if (fs.existsSync(logoPath)) {
+        // doc.image(logoPath, 50, 45, { width: 80 });
+        doc.image(logoPath, 50, 45, { width: 60 });
+      } else {
+        doc.rect(50, 45, 80, 50).stroke().fontSize(10).text("LOGO", 70, 70);
+      }
+    } catch (e) {}
+
+// Company info block (left side)
+const leftStartX = 120; // start after logo
+const leftStartY = 50;
+doc
+  .fontSize(12)
+  .fillColor("#333333")
+  .text("MicroMerce Corp.", leftStartX, leftStartY)
+  .fontSize(10)
+  .text("123 Commerce Street,", leftStartX, leftStartY + 15)
+  .text("City, State, 12345", leftStartX, leftStartY + 30)
+  .text("support@micromerce.com", leftStartX, leftStartY + 45);
+
+// Invoice info block (right side)
+const rightStartX = 320; // adjust for your page width (A4 width ≈ 595)
+const rightStartY = 50;
+doc
+  .fontSize(20)
+  .fillColor("#000")
+  .text("INVOICE", rightStartX, rightStartY, { align: "right" })
+  .fontSize(10)
+  .text(`Invoice #: ${order.orderNumber}:${Date.now()}`, rightStartX, rightStartY + 25, { align: "right" })
+  .text(`Order ID: ${order.orderNumber}`, rightStartX, rightStartY + 40,  { align: "right" })
+  .text(
+    `Invoice Date: ${new Date(order.createdAt).toLocaleDateString()}`,
+    rightStartX,
+    rightStartY + 55,
+    { align: "right" }
+  );
+
+    // doc.fontSize(12).fillColor("#333333").text("MicroMerce Corp.", 150-20, 50);
+    // doc.fontSize(10)
+    //   .text("123 Commerce Street,", 150 -20, 65)
+    //   .text("City, State, 12345", 150 -20, 80)
+    //   .text("support@micromerce.com", 150 -20, 95)
+    //   .moveDown();
+
+    // doc
+    //   .fontSize(20)
+    //   .fillColor("#000")
+    //   .text("INVOICE", { align: "right" })
+    //   .fontSize(10)
+    //   .text(`Invoice #: ${order.orderNumber}:${Date.now()}`, { align: "right" })
+    //   .text(`Order ID: ${order.orderNumber}`, { align: "right" })
+    //   .text(`Invoice Date: ${new Date(order.createdAt).toLocaleDateString()}`, { align: "right" })
+    //   .moveDown();
+
+    // ===== Billing & Payment =====
+    const leftX = 50;
+    const rightX = 320;
+    // const y = 180 + 15;
+    const y = 135;
+
+    const billingName =
+      order.paymentInfo?.billing_details?.name ||
+      `${order.shippingInfo.firstName} ${order.shippingInfo.lastName}`;
+    const billingEmail =
+      order.paymentInfo?.billing_details?.email || order.shippingInfo.email;
+
+    doc.fontSize(10).font("Helvetica-Bold").text("Bill To:", leftX, y);
+    doc.font("Helvetica").text(billingName, leftX, y + 15);
+    if (billingEmail) doc.text(billingEmail, leftX, y + 30);
+    doc
+      .text(order.shippingInfo.address, leftX, y + 45)
+      .text(
+        `${order.shippingInfo.city}, ${order.shippingInfo.state} ${order.shippingInfo.zipCode}`,
+        leftX,
+        y + 60
+      )
+      .text(order.shippingInfo.country, leftX, y + 75);
+
+    doc.font("Helvetica-Bold").text("Payment:", rightX, y);
+    const payment = order.paymentInfo;
+    doc
+      .font("Helvetica")
+      .text(`Method: ${payment.type} (${payment.card.brand})`, rightX, y + 15)
+      .text(`Card: ****${payment.card.last4}`, rightX, y + 30)
+      .text(`Payment ID: ${payment.id}`, rightX, y + 45)
+      // .text(`Status: ${payment.status}`, rightX, y + 75)
+      .text(`Status: ${order.status}`, rightX, y + 75)
+      .text(`Paid At: ${formatDate(payment.created)}`, rightX, y + 90);
+
+    // ===== Items Table =====
+    // const tableTop = 280 + 30;
+    const tableTop = 250;
+    doc.moveTo(50, tableTop - 5).lineTo(550, tableTop - 5).strokeColor("#aaaaaa").stroke();
+
+    doc.font("Helvetica-Bold");
+    doc.text("Item", 50, tableTop);
+    doc.text("Qty", 320, tableTop);
+    doc.text("Price", 370, tableTop);
+    doc.text("Total", 470, tableTop, { align: "right" });
+    doc.moveTo(50, tableTop + 15).lineTo(550, tableTop + 15).strokeColor("#eeeeee").stroke();
+
+    let itemsY = tableTop + 25;
+    order.items.forEach((it, idx) => {
+      if (idx % 2 === 0) {
+        doc.rect(50, itemsY - 6, 500, 22).fillOpacity(0.03).fill("#000").fillOpacity(1);
+      }
+      const lineTotal = it.price * it.quantity;
+      doc.fillColor("#000").font("Helvetica");
+      doc.text(it.name, 50, itemsY, { width: 260 });
+      doc.text(it.quantity.toString(), 320, itemsY);
+      doc.text(formatMoney(it.price), 370, itemsY);
+      doc.text(formatMoney(lineTotal), 470, itemsY, { align: "right" });
+      itemsY += 24;
+    });
+
+    // ===== Totals =====
+    const totalsY = itemsY + 10;
+    doc.moveTo(50, totalsY).lineTo(550, totalsY).strokeColor("#dddddd").stroke();
+
+    doc.font("Helvetica-Bold");
+    doc.text("Subtotal", 370, totalsY + 15);
+    doc.text(formatMoney(order.subtotal), 470, totalsY + 15, { align: "right" });
+
+    doc.font("Helvetica");
+    doc.text("Shipping", 370, totalsY + 35);
+    doc.text(formatMoney(order.shippingFee), 470, totalsY + 35, { align: "right" });
+
+    doc.font("Helvetica-Bold");
+    doc.text("Total", 370, totalsY + 55);
+    doc.text(formatMoney(order.total), 470, totalsY + 55, { align: "right" });
+
+    // ===== Footer =====
+    doc
+      .fontSize(10)
+      .fillColor("#666")
+      .text(
+        "Payment is due upon receipt. If you have any questions about this invoice, contact billing@micromerce.com",
+        50,
+        720,
+        { align: "center", width: 500 }
+      );
+
+    doc.end();
+  } catch (err) {
+    console.error("Error generating invoice:", err);
+    res.status(500).json({ error: "Failed to generate invoice" });
+  }
+});
+
 app.get("/admin/:id", authenticate, requireAdmin, async (req, res) => {
   // const { id: userId } = req.user;
   const order = await Order.findOne({ where: { id: req.params.id } });

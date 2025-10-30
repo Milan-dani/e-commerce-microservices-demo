@@ -94,7 +94,7 @@ export default function Contact() {
               Contact Us
             </h1>
             <p className="text-xl text-blue-100 max-w-3xl mx-auto">
-              We're here to help! Get in touch with our team for any questions, 
+              We&apos;re here to help! Get in touch with our team for any questions, 
               concerns, or feedback you might have.
             </p>
           </motion.div>
@@ -267,7 +267,7 @@ export default function Contact() {
                     <HelpCircle className="w-5 h-5 text-blue-600 mt-1" />
                     <div>
                       <h4 className="font-medium text-gray-900">Product Questions</h4>
-                      <p className="text-sm text-gray-600">Need help choosing the right product? We're here to help.</p>
+                      <p className="text-sm text-gray-600">Need help choosing the right product? We&apos;re here to help.</p>
                     </div>
                   </div>
                   <div className="flex items-start gap-3">

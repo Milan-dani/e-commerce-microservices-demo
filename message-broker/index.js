@@ -2,7 +2,7 @@ require("dotenv").config();
 const express = require("express");
 const { Server } = require("socket.io");
 const http = require("http");
-const { connectNATS } = require("./natsConnection");
+// const { connectNATS } = require("./natsConnection");
 const { registerTopic, getTopics } = require("./topicRegistry");
 const { syncWithConsul } = require("./consulIntegration");
 const { logInfo } = require("./utils/logger");
@@ -124,8 +124,9 @@ io.on("connection", (socket) => {
 //   console.log(`Message Broker Service running on port ${PORT}`);
 // });
 server.listen(PORT, async () => {
-  await connectNATS();
-  startMonitoring();
+  // await connectNATS();
+  // await connectNats();
+  await startMonitoring();
   logInfo(`[Broker] Message Broker Service running on port ${PORT}`);
   console.log(`Message Broker Service running on port ${PORT}`);
 });

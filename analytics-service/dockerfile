@@ -1,0 +1,35 @@
+# ------------------------------
+# 1️⃣ Base image
+# ------------------------------
+FROM node:20-alpine
+
+# Set working directory inside container
+WORKDIR /app
+
+# ------------------------------
+# 2️⃣ Copy dependency files and install
+# ------------------------------
+COPY package*.json ./
+RUN npm ci --only=production
+
+# ------------------------------
+# 3️⃣ Copy the rest of the app
+# ------------------------------
+COPY . .
+
+# ------------------------------
+# 4️⃣ Environment setup
+# ------------------------------
+# Default values (can be overridden in docker-compose)
+ENV PORT=3008
+ENV NODE_ENV=production
+
+# ------------------------------
+# 5️⃣ Expose internal container port
+# ------------------------------
+EXPOSE 3008
+
+# ------------------------------
+# 6️⃣ Start the service
+# ------------------------------
+CMD ["npm", "start"]

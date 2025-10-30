@@ -3,6 +3,9 @@ import "./globals.css";
 import Navigation from "@/components/Navigation";
 import Footer from "@/components/Footer";
 import { AuthProvider } from "@/components/AuthContext";
+import ReduxProvider from "@/components/ReduxProvider";
+import { Toaster } from "react-hot-toast";
+import Navbar from "@/components/Navbar";
 
 const geistSans = Geist({
   variable: "--font-geist-sans",
@@ -16,22 +19,38 @@ const geistMono = Geist_Mono({
 
 export const metadata = {
   title: "MicroMerce Store - Your One-Stop Shopping Destination",
-  description: "Discover amazing products at great prices. Fast shipping, excellent customer service, and quality guaranteed.",
+  description:
+    "Discover amazing products at great prices. Fast shipping, excellent customer service, and quality guaranteed.",
 };
 
 export default function RootLayout({ children }) {
+
+  
   return (
     <html lang="en">
       <body
         className={`${geistSans.variable} ${geistMono.variable} antialiased`}
       >
-        <AuthProvider>
-          <Navigation />
-          <main className="min-h-screen">
-            {children}
-          </main>
-          <Footer />
-        </AuthProvider>
+        <ReduxProvider>
+          {/* <AuthProvider> */}
+            {/* <Navigation /> */}
+           <Navbar />
+            <main className="min-h-screen">{children}</main>
+            <Footer />
+            <Toaster
+              position="top-center"
+              toastOptions={{
+                // Default options for all toasts
+                style: {
+                  background: "#333", // dark background
+                  color: "#fff", // light text
+                  borderRadius: "8px",
+                  padding: "16px",
+                },
+              }}
+            />
+          {/* </AuthProvider> */}
+        </ReduxProvider>
       </body>
     </html>
   );

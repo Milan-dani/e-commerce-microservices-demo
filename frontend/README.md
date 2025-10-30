@@ -1,3 +1,34 @@
+# RTK Query + Redux Store (auto-generated)
+
+This folder contains an auto-generated Redux Toolkit + RTK Query API layer based on a Postman collection.
+
+What was generated
+- `src/api/baseApi.js` - RTK Query base API with fetchBaseQuery and token header wiring
+- `src/api/services/*` - RTK Query services for each Postman folder (Auth, Products, Cart, Orders, Payments, Inventory, Recommendations, Analytics)
+- `src/store/slices/*` - Redux slices for auth, ui, products, cart, orders, payments, inventory, recommendations, analytics
+- `src/store/index.js` - Configured Redux store wiring the API and slices
+
+Quick start
+
+1. Install deps:
+
+```bash
+npm install @reduxjs/toolkit react-redux
+# or with yarn
+yarn add @reduxjs/toolkit react-redux
+```
+
+2. Provide the store to your Next.js app (we added an example layout in `src/app/layout.js`).
+
+3. Use the generated RTK Query hooks in components to call endpoints. See `src/app/demo-login/page.js` for an example login flow that stores the token into `auth` slice/localStorage.
+
+Notes
+- The base API uses `localStorage.getItem('token')` for Authorization headers. When using SSR routes, token access is guarded.
+- Adjust endpoints if backend paths differ from the Postman collection.
+
+If you'd like, I can also:
+- Add unit tests for slices
+- Add optimistic updates or more advanced cache invalidation strategies
 # E-commerce Frontend Project
 
 A modern, responsive e-commerce website built with Next.js, featuring a complete shopping experience with user authentication, product management, and admin dashboard.

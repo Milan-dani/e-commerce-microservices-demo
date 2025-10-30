@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { motion } from "framer-motion";
 import Link from "next/link";
 import {
@@ -23,14 +23,25 @@ import {
 } from "lucide-react";
 import Button from "@/components/Button";
 import Image from "next/image";
+import {
+  useGetCategoriesQuery,
+  useListProductsQuery,
+} from "@/api/services/productsApi";
+import CategoryFilter from "@/components/CategoryFilter";
+import AddProductModal from "@/components/models/AddEditProductModal";
+import AddEditProductModal from "@/components/models/AddEditProductModal";
+import ConfirmDeleteModal from "@/components/models/ConfirmDeleteModal";
 
 export default function AdminProducts() {
   const [viewMode, setViewMode] = useState("grid");
   const [showAddModal, setShowAddModal] = useState(false);
+  const [showDeleteModel, setShowDeleteModel] = useState(false);
   const [editingProduct, setEditingProduct] = useState(null);
+  const [deletingProduct, setDeletingProduct] = useState(null);
   const [searchTerm, setSearchTerm] = useState("");
   const [filterCategory, setFilterCategory] = useState("all");
   const [filterStatus, setFilterStatus] = useState("all");
+  const [products, setProducts] = useState([]);
 
   const [newProduct, setNewProduct] = useState({
     name: "",
@@ -41,96 +52,6 @@ export default function AdminProducts() {
     status: "active",
     image: "",
   });
-
-  const products = [
-    {
-      id: 1,
-      name: "Wireless Headphones",
-      description: "High-quality wireless headphones with noise cancellation",
-      price: 99.99,
-      category: "Electronics",
-      stock: 45,
-      status: "active",
-      image: "/api/placeholder/80/80",
-      sales: 156,
-      rating: 4.5,
-      dateAdded: "2024-01-01",
-    },
-    {
-      id: 2,
-      name: "Smart Watch",
-      description: "Advanced smartwatch with health monitoring features",
-      price: 199.99,
-      category: "Electronics",
-      stock: 23,
-      status: "active",
-      image: "/api/placeholder/80/80",
-      sales: 98,
-      rating: 4.8,
-      dateAdded: "2024-01-02",
-    },
-    {
-      id: 3,
-      name: "Laptop Stand",
-      description: "Adjustable laptop stand for better ergonomics",
-      price: 49.99,
-      category: "Accessories",
-      stock: 0,
-      status: "out_of_stock",
-      image: "/api/placeholder/80/80",
-      sales: 234,
-      rating: 4.3,
-      dateAdded: "2024-01-03",
-    },
-    {
-      id: 4,
-      name: "Bluetooth Speaker",
-      description: "Portable Bluetooth speaker with excellent sound quality",
-      price: 79.99,
-      category: "Electronics",
-      stock: 67,
-      status: "active",
-      image: "/api/placeholder/80/80",
-      sales: 87,
-      rating: 4.6,
-      dateAdded: "2024-01-04",
-    },
-    {
-      id: 5,
-      name: "Gaming Mouse",
-      description: "High-precision gaming mouse with RGB lighting",
-      price: 59.99,
-      category: "Gaming",
-      stock: 12,
-      status: "active",
-      image: "/api/placeholder/80/80",
-      sales: 145,
-      rating: 4.7,
-      dateAdded: "2024-01-05",
-    },
-    {
-      id: 6,
-      name: "Mechanical Keyboard",
-      description: "Mechanical keyboard with customizable RGB backlighting",
-      price: 129.99,
-      category: "Gaming",
-      stock: 8,
-      status: "low_stock",
-      image: "/api/placeholder/80/80",
-      sales: 92,
-      rating: 4.4,
-      dateAdded: "2024-01-06",
-    },
-  ];
-
-  const categories = [
-    "All",
-    "Electronics",
-    "Gaming",
-    "Accessories",
-    "Clothing",
-    "Home",
-  ];
 
   const getStatusColor = (status) => {
     switch (status) {
@@ -185,12 +106,85 @@ export default function AdminProducts() {
     setShowAddModal(true);
   };
 
-  const handleDeleteProduct = (productId) => {
-    if (confirm("Are you sure you want to delete this product?")) {
-      // Handle product deletion
-      console.log("Deleting product:", productId);
-    }
+  const handleDeleteProduct = (product) => {
+    setDeletingProduct(product);
+    setShowDeleteModel(true);
+    // if (confirm("Are you sure you want to delete this product?")) {
+    //   // Handle product deletion
+    //   console.log("Deleting product:", productId);
+    // }
   };
+
+  const [filters, setFilters] = useState({
+    page: 1,
+    limit: 10,
+    search: "",
+    categories: "all",
+    status: "all", // 'all', 'active', 'low_stock', 'out_of_stock', 'inactive'
+    priceRange: [null, null],
+    availability: [], // ['inStock', 'onSale', 'new']
+    sortBy: "featured",
+  });
+  const [totalPages, setTotalPages] = useState(1);
+  const { data: categories = [], isLoading: isLoadingCategories } =
+    useGetCategoriesQuery();
+  const { data, isLoading, isError } = useListProductsQuery({
+    category: filters.categories !== "all" ? filters.categories : undefined,
+    status: filters.status !== "all" ? filters.status : undefined,
+    //
+    search: filters.search,
+    // category: filters.categories.length ? filters.categories.join(",") : undefined,
+    minPrice: filters.priceRange[0] || undefined,
+    maxPrice: filters.priceRange[1] || undefined,
+    inStock: filters.availability.includes("inStock") ? true : undefined,
+    isNewProduct: filters.availability.includes("new") ? true : undefined,
+    onSale: filters.availability.includes("onSale") ? true : undefined,
+    sortBy: filters.sortBy,
+    page: filters.page,
+    limit: filters.limit,
+  });
+
+  useEffect(() => {
+    if (data) {
+      setProducts(data.products);
+      setTotalPages(data.totalPages);
+    }
+  }, [data]);
+  // useEffect(() => {
+  //   if (categories) {
+  //     setCategories(categories || []);
+  //   }
+  // }, [categories]);
+  const updateFilter = (key, value) => {
+    setFilters((prev) => ({
+      ...prev,
+      [key]: value,
+      page: key === "page" ? value : 1, // reset page on any filter change except page
+    }));
+  };
+
+  const handleCategoryChange = (category) => {
+    const newCategories = filters.categories.includes(category)
+      ? filters.categories.filter((c) => c !== category)
+      : [...filters.categories, category];
+    updateFilter("categories", newCategories);
+  };
+
+  const handleAvailabilityChange = (type) => {
+    const newAvailability = filters.availability.includes(type)
+      ? filters.availability.filter((a) => a !== type)
+      : [...filters.availability, type];
+    updateFilter("availability", newAvailability);
+  };
+
+  const handlePriceChange = (minOrMax, value) => {
+    const newPriceRange = [...filters.priceRange];
+    if (minOrMax === "min") newPriceRange[0] = Number(value);
+    else newPriceRange[1] = Number(value);
+    updateFilter("priceRange", newPriceRange);
+  };
+
+  const handleSortChange = (value) => updateFilter("sortBy", value);
 
   return (
     <div className="min-h-screen bg-gray-50">
@@ -304,14 +298,30 @@ export default function AdminProducts() {
                 <input
                   type="text"
                   placeholder="Search products..."
-                  value={searchTerm}
-                  onChange={(e) => setSearchTerm(e.target.value)}
+                  value={filters.search}
+                  onChange={(e) => updateFilter("search", e.target.value)}
                   className="w-full pl-10 pr-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-gray-900 placeholder-gray-400"
                 />
               </div>
 
-              {/* Category Filter */}
+              {/* Category Dropdown */}
               <select
+                value={filters.categories}
+                onChange={(e) => updateFilter("categories", e.target.value)}
+                className="flex-1 min-w-[160px] px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-gray-900"
+              >
+                <option value="all">All Categories</option>
+                {isLoadingCategories ? (
+                  <option disabled>Loading...</option>
+                ) : (
+                  categories.map((cat) => (
+                    <option key={cat} value={cat}>
+                      {cat}
+                    </option>
+                  ))
+                )}
+              </select>
+              {/* <select
                 value={filterCategory}
                 onChange={(e) => setFilterCategory(e.target.value)}
                 className="flex-1 min-w-[160px] px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-gray-900"
@@ -321,10 +331,21 @@ export default function AdminProducts() {
                     {category}
                   </option>
                 ))}
-              </select>
+              </select> */}
 
               {/* Status Filter */}
               <select
+                value={filters.status}
+                onChange={(e) => updateFilter("status", e.target.value)}
+                className="flex-1 min-w-[160px] px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-gray-900"
+              >
+                <option value="all">All Status</option>
+                <option value="active">Active</option>
+                <option value="low_stock">Low Stock</option>
+                <option value="out_of_stock">Out of Stock</option>
+                <option value="inactive">Inactive</option>
+              </select>
+              {/* <select
                 value={filterStatus}
                 onChange={(e) => setFilterStatus(e.target.value)}
                 className="flex-1 min-w-[160px] px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-gray-900"
@@ -334,7 +355,7 @@ export default function AdminProducts() {
                 <option value="low_stock">Low Stock</option>
                 <option value="out_of_stock">Out of Stock</option>
                 <option value="inactive">Inactive</option>
-              </select>
+              </select> */}
             </div>
 
             {/* Right Section: Buttons */}
@@ -392,7 +413,7 @@ export default function AdminProducts() {
         >
           {filteredProducts.map((product, index) => (
             <motion.div
-              key={product.id}
+              key={product._id}
               initial={{ opacity: 0, y: 20 }}
               animate={{ opacity: 1, y: 0 }}
               transition={{ duration: 0.5, delay: index * 0.1 }}
@@ -409,18 +430,17 @@ export default function AdminProducts() {
                 <div className="absolute inset-0 flex items-center justify-center">
                   {product.image ? (
                     <div className="relative w-full h-full">
-                    <Image
-                      src={product.image}
-                      // src={'https://picsum.photos/200'}
-                      // src={'https://via.placeholder.com/400x400?text=Product+Image'}
-                      // src={'https://source.unsplash.com/400x400/?product'}
-                      alt={product.name ?? 'Product image'}
-                      fill
-                      className="object-contain"
-                      sizes="100vw"
-                    />
-                  </div>
-                  
+                      <Image
+                        src={product.image}
+                        // src={'https://picsum.photos/200'}
+                        // src={'https://via.placeholder.com/400x400?text=Product+Image'}
+                        // src={'https://source.unsplash.com/400x400/?product'}
+                        alt={product.name ?? "Product image"}
+                        fill
+                        className="object-contain"
+                        sizes="100vw"
+                      />
+                    </div>
                   ) : (
                     <Package className="w-16 h-16 text-gray-400" />
                   )}
@@ -467,7 +487,7 @@ export default function AdminProducts() {
                 </div>
 
                 <div className="flex items-center justify-between text-sm text-gray-600 mb-4">
-                  <span>{product.sales} sales</span>
+                  <span>{product.sales || 0} sales</span>
                   <span>{product.category}</span>
                 </div>
 
@@ -485,6 +505,7 @@ export default function AdminProducts() {
                     icon={Edit}
                     variant="ghost"
                     className="border border-gray-300"
+                    onClick={() => handleEditProduct(product)}
                   >
                     Edit
                   </Button>
@@ -512,11 +533,54 @@ export default function AdminProducts() {
                     icon={Trash2}
                     variant="danger-outline"
                     className="border border-gray-300"
+                    //  onClick={() => handleDeleteProduct(product._id)}
+                     onClick={() => handleDeleteProduct(product)}
                   ></Button>
                 </div>
               </div>
             </motion.div>
           ))}
+        </motion.div>
+        {/* Pagination */}
+        <motion.div
+          initial={{ opacity: 0, y: 20 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.6, delay: 0.4 }}
+          className="mt-8 flex justify-center"
+        >
+          <div className="flex items-center space-x-2">
+            <button
+              disabled={filters.page <= 1}
+              onClick={() => updateFilter("page", filters.page - 1)}
+              className="px-3 py-2 border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors text-gray-900 disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              Previous
+            </button>
+
+            {Array.from({ length: totalPages }, (_, i) => i + 1).map(
+              (pageNum) => (
+                <button
+                  key={pageNum}
+                  onClick={() => updateFilter("page", pageNum)}
+                  className={`px-3 py-2 border rounded-lg transition-colors ${
+                    filters.page === pageNum
+                      ? "bg-blue-500 text-white border-blue-500"
+                      : "border-gray-300 text-gray-900 hover:bg-gray-50"
+                  }`}
+                >
+                  {pageNum}
+                </button>
+              )
+            )}
+
+            <button
+              disabled={filters.page >= totalPages}
+              onClick={() => updateFilter("page", filters.page + 1)}
+              className="px-3 py-2 border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors text-gray-900 disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              Next
+            </button>
+          </div>
         </motion.div>
 
         {/* Add/Edit Product Modal */}
@@ -733,6 +797,13 @@ export default function AdminProducts() {
             </motion.div>
           </motion.div>
         )}
+        <AddEditProductModal open={showAddModal} onClose={() => {setShowAddModal(false);setEditingProduct(null)}} editingProduct={editingProduct}/>
+          <ConfirmDeleteModal
+        open={showDeleteModel}
+        onClose={() => {setShowDeleteModel(false); setDeletingProduct(null);}}
+        // onConfirm={() => onDelete(product._id)}
+        deletingProduct={deletingProduct}
+      />
       </div>
     </div>
   );

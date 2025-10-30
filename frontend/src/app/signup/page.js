@@ -1,35 +1,77 @@
-'use client';
+"use client";
 
-import { useState } from 'react';
-import { motion } from 'framer-motion';
-import Link from 'next/link';
-import { Eye, EyeOff, Mail, Lock, User, ArrowRight, ShoppingCart } from 'lucide-react';
-import Button from '@/components/Button';
+import { useState } from "react";
+import { motion } from "framer-motion";
+import { useRouter } from "next/navigation";
+import Link from "next/link";
+import {
+  Eye,
+  EyeOff,
+  Mail,
+  Lock,
+  User,
+  ArrowRight,
+  ShoppingCart,
+  UserRound,
+} from "lucide-react";
+import Button from "@/components/Button";
+import { validateSignupForm } from "@/utils/formValidation";
+import { useSignupMutation } from "@/api/services/authApi";
+import { useDispatch } from "react-redux";
+import { setToken, setUser } from "@/store/slices/authSlice";
+import toast from "react-hot-toast";
 
 export default function Signup() {
   const [showPassword, setShowPassword] = useState(false);
   const [showConfirmPassword, setShowConfirmPassword] = useState(false);
   const [formData, setFormData] = useState({
-    firstName: '',
-    lastName: '',
-    email: '',
-    password: '',
-    confirmPassword: '',
-    agreeToTerms: false
+    firstName: "",
+    lastName: "",
+    email: "",
+    username: "",
+    password: "",
+    confirmPassword: "",
+    agreeToTerms: false,
+    role: "customer",
   });
+  const [errors, setErrors] = useState({});
+
+  const [signup, { isLoading }] = useSignupMutation();
+  const dispatch = useDispatch();
+  const router = useRouter();
 
   const handleChange = (e) => {
     const { name, value, type, checked } = e.target;
     setFormData({
       ...formData,
-      [name]: type === 'checkbox' ? checked : value
+      [name]: type === "checkbox" ? checked : value,
     });
   };
 
-  const handleSubmit = (e) => {
+  const handleSubmit = async (e) => {
     e.preventDefault();
-    // Handle signup logic here
-    console.log('Signup data:', formData);
+    // validate form
+    const newErrors = validateSignupForm(formData);
+    if (Object.keys(newErrors).length > 0) {
+      setErrors(newErrors);
+    } else {
+      setErrors({});
+      try {
+        const res = await signup({ ...formData }).unwrap();
+        // assume response contains { token, user }
+
+        if (res.token) {
+          dispatch(setToken(res.token));
+        }
+        if (res.user) dispatch(setUser(res.user));
+        toast.success("Signup Successful");
+        // Redirect to homepage after signup
+        router.push("/");
+      } catch (err) {
+        console.error("signup failed", err);
+        toast.error("signup failed");
+      }
+    }
   };
 
   return (
@@ -47,7 +89,9 @@ export default function Signup() {
             transition={{ duration: 0.5, delay: 0.2 }}
             className="mx-auto h-12 w-12 bg-blue-600 rounded-lg flex items-center justify-center"
           >
-            <span className="text-white font-bold text-xl"><ShoppingCart /></span>
+            <span className="text-white font-bold text-xl">
+              <ShoppingCart />
+            </span>
           </motion.div>
           <motion.h2
             initial={{ opacity: 0, y: 10 }}
@@ -63,8 +107,11 @@ export default function Signup() {
             transition={{ duration: 0.5, delay: 0.4 }}
             className="mt-2 text-sm text-gray-600"
           >
-            Or{' '}
-            <Link href="/login" className="font-medium text-blue-600 hover:text-blue-500">
+            Or{" "}
+            <Link
+              href="/login"
+              className="font-medium text-blue-600 hover:text-blue-500"
+            >
               sign in to your existing account
             </Link>
           </motion.p>
@@ -80,12 +127,15 @@ export default function Signup() {
           <div className="space-y-4">
             <div className="grid grid-cols-2 gap-4">
               <div>
-                <label htmlFor="firstName" className="block text-sm font-medium text-gray-700">
-                  First Name
+                <label
+                  htmlFor="firstName"
+                  className="block text-sm font-medium text-gray-700"
+                >
+                  First Name<span className="text-red-600">*</span>
                 </label>
                 <div className="mt-1 relative">
                   <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
-                    <User className="h-5 w-5 text-gray-400" />
+                    <UserRound className="h-5 w-5 text-gray-400" />
                   </div>
                   <input
                     id="firstName"
@@ -99,15 +149,21 @@ export default function Signup() {
                     placeholder="First name"
                   />
                 </div>
+                {errors.firstName && (
+                  <p className="text-red-400">{errors.firstName}</p>
+                )}
               </div>
 
               <div>
-                <label htmlFor="lastName" className="block text-sm font-medium text-gray-700">
-                  Last Name
+                <label
+                  htmlFor="lastName"
+                  className="block text-sm font-medium text-gray-700"
+                >
+                  Last Name<span className="text-red-600">*</span>
                 </label>
                 <div className="mt-1 relative">
                   <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
-                    <User className="h-5 w-5 text-gray-400" />
+                    <UserRound className="h-5 w-5 text-gray-400" />
                   </div>
                   <input
                     id="lastName"
@@ -121,12 +177,18 @@ export default function Signup() {
                     placeholder="Last name"
                   />
                 </div>
+                {errors.lastName && (
+                  <p className="text-red-400">{errors.lastName}</p>
+                )}
               </div>
             </div>
 
             <div>
-              <label htmlFor="email" className="block text-sm font-medium text-gray-700">
-                Email address
+              <label
+                htmlFor="email"
+                className="block text-sm font-medium text-gray-700"
+              >
+                Email address<span className="text-red-600">*</span>
               </label>
               <div className="mt-1 relative">
                 <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
@@ -144,11 +206,43 @@ export default function Signup() {
                   placeholder="Enter your email"
                 />
               </div>
+              {errors.email && <p className="text-red-400">{errors.email}</p>}
             </div>
 
             <div>
-              <label htmlFor="password" className="block text-sm font-medium text-gray-700">
-                Password
+              <label
+                htmlFor="email"
+                className="block text-sm font-medium text-gray-700"
+              >
+                Username<span className="text-red-600">*</span>
+              </label>
+              <div className="mt-1 relative">
+                <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
+                  <User className="h-5 w-5 text-gray-400" />
+                </div>
+                <input
+                  id="username"
+                  name="username"
+                  type="text"
+                  autoComplete="username"
+                  required
+                  value={formData.username}
+                  onChange={handleChange}
+                  className="appearance-none relative block w-full pl-10 pr-3 py-3 border border-gray-300 placeholder-gray-500 text-gray-900 rounded-lg focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm"
+                  placeholder="Enter your username"
+                />
+              </div>
+              {errors.username && (
+                <p className="text-red-400">{errors.username}</p>
+              )}
+            </div>
+
+            <div>
+              <label
+                htmlFor="password"
+                className="block text-sm font-medium text-gray-700"
+              >
+                Password<span className="text-red-600">*</span>
               </label>
               <div className="mt-1 relative">
                 <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
@@ -157,7 +251,7 @@ export default function Signup() {
                 <input
                   id="password"
                   name="password"
-                  type={showPassword ? 'text' : 'password'}
+                  type={showPassword ? "text" : "password"}
                   autoComplete="new-password"
                   required
                   value={formData.password}
@@ -177,11 +271,17 @@ export default function Signup() {
                   )}
                 </button>
               </div>
+              {errors.password && (
+                <p className="text-red-400">{errors.password}</p>
+              )}
             </div>
 
             <div>
-              <label htmlFor="confirmPassword" className="block text-sm font-medium text-gray-700">
-                Confirm Password
+              <label
+                htmlFor="confirmPassword"
+                className="block text-sm font-medium text-gray-700"
+              >
+                Confirm Password<span className="text-red-600">*</span>
               </label>
               <div className="mt-1 relative">
                 <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
@@ -190,7 +290,7 @@ export default function Signup() {
                 <input
                   id="confirmPassword"
                   name="confirmPassword"
-                  type={showConfirmPassword ? 'text' : 'password'}
+                  type={showConfirmPassword ? "text" : "password"}
                   autoComplete="new-password"
                   required
                   value={formData.confirmPassword}
@@ -210,6 +310,9 @@ export default function Signup() {
                   )}
                 </button>
               </div>
+              {errors.confirmPassword && (
+                <p className="text-red-400">{errors.confirmPassword}</p>
+              )}
             </div>
           </div>
 
@@ -223,15 +326,22 @@ export default function Signup() {
               onChange={handleChange}
               className="h-4 w-4 text-blue-600 focus:ring-blue-500 border-gray-300 rounded"
             />
-            <label htmlFor="agreeToTerms" className="ml-2 block text-sm text-gray-900">
-              I agree to the{' '}
+            <label
+              htmlFor="agreeToTerms"
+              className="ml-2 block text-sm text-gray-900"
+            >
+              I agree to the{" "}
               <Link href="/terms" className="text-blue-600 hover:text-blue-500">
                 Terms of Service
-              </Link>{' '}
-              and{' '}
-              <Link href="/privacy" className="text-blue-600 hover:text-blue-500">
+              </Link>{" "}
+              and{" "}
+              <Link
+                href="/privacy"
+                className="text-blue-600 hover:text-blue-500"
+              >
                 Privacy Policy
               </Link>
+              <span className="text-red-600">*</span>
             </label>
           </div>
 
@@ -248,7 +358,9 @@ export default function Signup() {
           </motion.button> */}
           <Button
             icon={ArrowRight}
-            onClick={() => {}}
+            type="submit"
+            // onClick={() => {}}
+            isLoading={isLoading}
             className="w-full bg-blue-600 text-white py-3 px-4 rounded-lg font-semibold hover:bg-blue-700 transition-colors flex items-center justify-center gap-2 mb-2"
           >
             Create account

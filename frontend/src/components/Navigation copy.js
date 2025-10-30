@@ -4,11 +4,12 @@ import Link from 'next/link';
 import { useState } from 'react';
 import { motion } from 'framer-motion';
 import { ShoppingCart, User, Menu, X, Search, Heart } from 'lucide-react';
-import { useAuth } from '@/components/AuthContext';
+// import { useAuth } from '@/components/AuthContext';
 
 export default function Navigation() {
   const [isMenuOpen, setIsMenuOpen] = useState(false);
   const { user, logout } = useAuth();
+
   const isLoggedIn = Boolean(user);
 
   const toggleMenu = () => {
