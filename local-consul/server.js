@@ -2,6 +2,12 @@ require("dotenv").config();
 const express = require("express");
 const bodyParser = require("body-parser");
 // const fetch = require("node-fetch");
+const {
+  createMonitorConnection,
+  listStreams,
+  listConsumers,
+  subscribeAdvisories,
+} = require("@milan-dani/message-broker/monitor");
 
 const app = express();
 app.use(bodyParser.json());
@@ -135,7 +141,7 @@ async function healthCheck() {
   }
 }
 
-setInterval(healthCheck, HEALTH_CHECK_INTERVAL);
+// setInterval(healthCheck, HEALTH_CHECK_INTERVAL);
 
 // Simple frontend to view services
 // app.get("/ui", (req, res) => {
@@ -277,9 +283,165 @@ app.get("/ui", (req, res) => {
   res.send(html);
 });
 
+let advisoryEvents = [];
+let streamCache = [];
+let consumerCache = [];
+async function initMonitor() {
+  console.log("🚀 Connecting to NATS for monitoring...");
+  const { nc, js, jsm } = await createMonitorConnection();
 
+  // Collect stream & consumer data periodically
+  async function refreshData() {
+    streamCache = await listStreams();
+    const allConsumers = [];
+    for (const s of streamCache) {
+      const consumers = await listConsumers(s.config.name);
+      allConsumers.push({ stream: s.config.name, consumers });
+    }
+    consumerCache = allConsumers;
+  }
+
+  await refreshData();
+  setInterval(refreshData, 5000); // refresh every 5s
+
+  // Subscribe to JetStream advisories (activity, metrics, etc.)
+  await subscribeAdvisories((subject, data) => {
+    advisoryEvents.unshift({
+      subject,
+      type: subject.includes("ADVISORY")
+        ? "Advisory"
+        : subject.includes("METRIC")
+        ? "Metric"
+        : "Other",
+      stream: data.stream || "-",
+      timestamp: new Date().toLocaleTimeString(),
+      data,
+    });
+
+    if (advisoryEvents.length > 100) advisoryEvents.pop();
+  });
+
+  // Return references if you want to access the data externally
+  return {
+    advisoryEvents,
+    streamCache,
+    consumerCache,
+    refreshData,
+  };
+}
+
+// app.get("/dashboard", async (req, res) => {
+//   // const stats = await monitorBroker.getStats();
+//   // res.json(stats);
+//   res.json({message : "ok"});
+// });
+
+// / --- Dashboard Route ---
+
+app.get("/dashboard", async (req, res) => {
+  let html = `
+    <html>
+      <head>
+        <title>📊 NATS Monitor Dashboard</title>
+        <meta http-equiv="refresh" content="5">
+        <style>
+          body { font-family: Arial, sans-serif; padding: 20px; background: #f9f9f9; color: #333; }
+          h1, h2 { color: #222; }
+          table { border-collapse: collapse; width: 100%; margin-bottom: 30px; }
+          th, td { border: 1px solid #ccc; padding: 8px; text-align: left; font-size: 14px; }
+          th { background-color: #f2f2f2; }
+          tr:nth-child(even) { background: #fafafa; }
+          .small { font-size: 13px; color: #666; }
+          .section { margin-bottom: 40px; }
+          .metric { background: #e3f2fd; }
+          .advisory { background: #e8f5e9; }
+        </style>
+      </head>
+      <body>
+        <h1>🧭 NATS Monitoring Dashboard</h1>
+        <p class="small">Auto-refreshes every 5 seconds</p>
+
+        <div class="section">
+          <h2>📦 JetStream Streams</h2>
+          <table>
+            <tr>
+              <th>Name</th>
+              <th>Subjects</th>
+              <th>Messages</th>
+              <th>Consumers</th>
+            </tr>`;
+
+  for (const s of streamCache) {
+    html += `<tr>
+      <td>${s.config.name}</td>
+      <td>${(s.config.subjects || []).join(", ")}</td>
+      <td>${s.state.messages}</td>
+      <td>${s.state.consumers}</td>
+    </tr>`;
+  }
+
+  html += `</table></div>
+  <div class="section">
+    <h2>👥 Consumers</h2>
+    <table>
+      <tr>
+        <th>Stream</th>
+        <th>Consumer Name</th>
+        <th>Delivered</th>
+        <th>Ack Pending</th>
+        <th>Last Active</th>
+      </tr>`;
+
+  for (const { stream, consumers } of consumerCache) {
+    for (const c of consumers) {
+      html += `<tr>
+        <td>${stream}</td>
+        <td>${c.name}</td>
+        <td>${c.num_ack_pending}</td>
+        <td>${c.delivered.stream_seq}</td>
+        <td>${c.delivered.last || "N/A"}</td>
+      </tr>`;
+    }
+  }
+
+  html += `</table></div>
+  <div class="section">
+    <h2>📈 JetStream Advisories & Metrics</h2>
+    <table>
+      <tr>
+        <th>Type</th>
+        <th>Subject</th>
+        <th>Stream</th>
+        <th>Time</th>
+        <th>Data (truncated)</th>
+      </tr>`;
+
+  for (const ev of advisoryEvents.slice(0, 30)) {
+    html += `<tr class="${ev.type.toLowerCase()}">
+      <td>${ev.type}</td>
+      <td>${ev.subject}</td>
+      <td>${ev.stream}</td>
+      <td>${ev.timestamp}</td>
+      <td><pre style="font-size:11px;">${JSON.stringify(ev.data).slice(
+        0,
+        100
+      )}...</pre></td>
+    </tr>`;
+  }
+
+  html += `
+    </table>
+    </div>
+  </body>
+  </html>
+  `;
+
+  res.send(html);
+});
 
 const PORT = process.env.PORT || 8500;
-app.listen(PORT, () =>
-  console.log(`Local Consul running at http://localhost:${PORT}`)
-);
+app.listen(PORT, async () => {
+  console.log(`Local Consul running at http://localhost:${PORT}`);
+  setInterval(healthCheck, HEALTH_CHECK_INTERVAL);
+  await initMonitor();
+});

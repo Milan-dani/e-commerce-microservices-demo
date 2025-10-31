@@ -16,6 +16,8 @@ const {
 } = require("./subscriber");
 const { drainOutbox, emit } = require("./utils/eventEmitter");
 
+const { initBroker } = require("@milan-dani/message-broker");
+
 const app = express();
 app.use(express.json());
 
@@ -25,13 +27,14 @@ app.use("/uploads", express.static(path.join(__dirname, "uploads")));
 
 const PORT = process.env.PORT || 3002;
 const SERVICE_NAME = process.env.SERVICE_NAME || "products";
+const JS_STREAM = process.env.JS_STREAM || "ECOM_EVENTS";
 const JWT_SECRET = process.env.JWT_SECRET || "changeme";
 const MONGO_URI = process.env.MONGO_URI || "mongodb://localhost:27017/products";
 
 const productImagePlaceholder = "product-image-placeholder.png";
 
 // Dynamic registration
-registerService(SERVICE_NAME, PORT);
+// registerService(SERVICE_NAME, PORT);
 
 // Middleware to Check JWT and Admin Role
 const adminAuth = (req, res, next) => {
@@ -413,9 +416,9 @@ app.get("/products/:id", async (req, res) => {
     product.image = getFullImageUrl(req, product.image);
   }
   // emiting event for Recomenation service via NATS
-  await emit("product.viewed", {
-    productId: product.id || req.params.id,
-  });
+  // await emit("product.viewed", {
+  //   productId: product.id || req.params.id,
+  // });
   res.json(product);
 });
 
@@ -559,15 +562,30 @@ app.get("/health", (req, res) => {
   res.json({ status: "ok" });
 });
 
+async function subscriptionHandler(broker) {
+  // Subscribe to payment events
+  broker.subscribe("order.paid", async (data, m) => {
+    console.log("💰 Payment success for order:", data.orderId);
+    // update order status in DB, etc.
+    // Update OrderStatus(data.orderId)
+  });
+}
+
 mongoose
   .connect(MONGO_URI)
   .then(() => {
     app.listen(PORT, async () => {
       console.log(`Product Service running on port ${PORT}`);
-      await registerService().then(justConnectNATS);
-      await new Promise((r) => setTimeout(r, 500)); // small delay helps stabilize connection
-      await drainOutbox();
-      await setupEventSubscriptions();
+      // await registerService().then(justConnectNATS);
+      // await new Promise((r) => setTimeout(r, 500)); // small delay helps stabilize connection
+      // await drainOutbox();
+      // await setupEventSubscriptions();
+      await registerService();
+
+      let broker = await initBroker({ serviceName: SERVICE_NAME, stream: JS_STREAM });
+    await new Promise((r) => setTimeout(r, 500)); // small delay helps stabilize connection
+    await subscriptionHandler(broker);
+
     });
   })
   .catch((err) => console.error("MongoDB connection error:", err));

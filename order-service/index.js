@@ -19,14 +19,19 @@ const {
   setupEventSubscriptions,
 } = require("./subscriber");
 const { connectNats } = require("./utils/natsClient");
-const { drainOutbox, emit } = require("./utils/eventEmitter");
+// const { drainOutbox, emit } = require("./utils/eventEmitter");
+
+const { initBroker } = require("@milan-dani/message-broker");
 
 const app = express();
 // app.use(bodyParser.json());
 app.use(express.json());
+let broker;
 
 const PORT = process.env.PORT || 3004;
 const SERVICE_NAME = process.env.SERVICE_NAME || "orders";
+const JS_STREAM = process.env.JS_STREAM || "ECOM_EVENTS";
+
 const MESSAGE_BROKER_URL =
   process.env.MESSAGE_BROKER_URL || "http://localhost:3009";
 
@@ -105,10 +110,13 @@ app.post("/checkout/create", authenticate, async (req, res) => {
   });
 
   // Emit Event To NATS
-  await emit("order.created", {
+  // await emit("order.created", {
+  //   orderId: order.id,
+  //   userId,
+  //   total,
+  // });
+  await broker.emit("order.paid", {
     orderId: order.id,
-    userId,
-    total,
   });
 
   res.json(order);
@@ -158,7 +166,7 @@ app.patch("/checkout/:orderId/payment", authenticate, async (req, res) => {
 
   // order.paymentInfo = { method: paymentMethod, cardToken, status: "pending" };
   order.paymentInfo = {
-...paymentInfo,
+    ...paymentInfo,
     status: "pending",
   };
   order.currentStep = 3;
@@ -189,8 +197,6 @@ app.patch("/checkout/:orderId/payment", authenticate, async (req, res) => {
 
 //   res.json(order);
 // });
-
-
 
 app.post("/checkout/:orderId/place", authenticate, async (req, res) => {
   const { id: userId } = req.user;
@@ -239,19 +245,19 @@ app.post("/checkout/:orderId/place", authenticate, async (req, res) => {
       if (err.status && err.status < 500) {
         // ⚠️ Payment failed due to user/card issue, NOT service down
         console.warn("Payment failed (user/card issue):", err.message);
-    
+
         order.paymentInfo.status = "failed";
         order.paymentInfo.reason = err.response?.reason || err.message;
         order.status = "failed";
         await order.save();
-    
+
         return res.status(400).json({
           success: false,
           message: err.response?.reason || "Payment failed",
           order,
         });
       }
-    
+
       // 🚨 Real service failure (network, consul, crash, etc.)
       console.error("Payment Service unavailable:", err.message);
       order.paymentInfo.status = "pending";
@@ -263,7 +269,6 @@ app.post("/checkout/:orderId/place", authenticate, async (req, res) => {
         message: "Payment service unavailable, order kept pending",
       });
     }
-    
 
     // 4️⃣ Handle Payment Service response
     if (paymentResult.success && paymentResult.status === "paid") {
@@ -274,14 +279,22 @@ app.post("/checkout/:orderId/place", authenticate, async (req, res) => {
       await order.save();
 
       // Publish "order.paid" for analytics/notifications/etc.
-      
-      await emit("order.paid", {
-        orderId: order.id,
-        userId,
-        transactionId: paymentResult.transactionId,
-        amount: order.total,
-        items: order.items
-      });
+
+      // await emit("order.paid", {
+      //   orderId: order.id,
+      //   userId,
+      //   transactionId: paymentResult.transactionId,
+      //   amount: order.total,
+      //   items: order.items,
+      // });
+      // Emit an event without manually connecting every time
+  await broker.emit("order.paid", {
+      orderId: order.id,
+      userId,
+      transactionId: paymentResult.transactionId,
+      amount: order.total,
+      items: order.items,
+    });
 
       return res.json({ success: true, order });
     }
@@ -599,7 +612,6 @@ app.get("/:id", authenticate, async (req, res) => {
   // res.json(order);
 });
 
-
 function formatMoney(n) {
   return `$${Number(n || 0).toFixed(2)}`;
 }
@@ -619,7 +631,10 @@ app.get("/:id/invoice", authenticate, async (req, res) => {
 
     // Stream PDF directly to response
     res.setHeader("Content-Type", "application/pdf");
-    res.setHeader("Content-Disposition", `attachment; filename=invoice-${order.orderNumber}.pdf`);
+    res.setHeader(
+      "Content-Disposition",
+      `attachment; filename=invoice-${order.orderNumber}.pdf`
+    );
     doc.pipe(res);
 
     // ===== Header =====
@@ -633,34 +648,41 @@ app.get("/:id/invoice", authenticate, async (req, res) => {
       }
     } catch (e) {}
 
-// Company info block (left side)
-const leftStartX = 120; // start after logo
-const leftStartY = 50;
-doc
-  .fontSize(12)
-  .fillColor("#333333")
-  .text("MicroMerce Corp.", leftStartX, leftStartY)
-  .fontSize(10)
-  .text("123 Commerce Street,", leftStartX, leftStartY + 15)
-  .text("City, State, 12345", leftStartX, leftStartY + 30)
-  .text("support@micromerce.com", leftStartX, leftStartY + 45);
+    // Company info block (left side)
+    const leftStartX = 120; // start after logo
+    const leftStartY = 50;
+    doc
+      .fontSize(12)
+      .fillColor("#333333")
+      .text("MicroMerce Corp.", leftStartX, leftStartY)
+      .fontSize(10)
+      .text("123 Commerce Street,", leftStartX, leftStartY + 15)
+      .text("City, State, 12345", leftStartX, leftStartY + 30)
+      .text("support@micromerce.com", leftStartX, leftStartY + 45);
 
-// Invoice info block (right side)
-const rightStartX = 320; // adjust for your page width (A4 width ≈ 595)
-const rightStartY = 50;
-doc
-  .fontSize(20)
-  .fillColor("#000")
-  .text("INVOICE", rightStartX, rightStartY, { align: "right" })
-  .fontSize(10)
-  .text(`Invoice #: ${order.orderNumber}:${Date.now()}`, rightStartX, rightStartY + 25, { align: "right" })
-  .text(`Order ID: ${order.orderNumber}`, rightStartX, rightStartY + 40,  { align: "right" })
-  .text(
-    `Invoice Date: ${new Date(order.createdAt).toLocaleDateString()}`,
-    rightStartX,
-    rightStartY + 55,
-    { align: "right" }
-  );
+    // Invoice info block (right side)
+    const rightStartX = 320; // adjust for your page width (A4 width ≈ 595)
+    const rightStartY = 50;
+    doc
+      .fontSize(20)
+      .fillColor("#000")
+      .text("INVOICE", rightStartX, rightStartY, { align: "right" })
+      .fontSize(10)
+      .text(
+        `Invoice #: ${order.orderNumber}:${Date.now()}`,
+        rightStartX,
+        rightStartY + 25,
+        { align: "right" }
+      )
+      .text(`Order ID: ${order.orderNumber}`, rightStartX, rightStartY + 40, {
+        align: "right",
+      })
+      .text(
+        `Invoice Date: ${new Date(order.createdAt).toLocaleDateString()}`,
+        rightStartX,
+        rightStartY + 55,
+        { align: "right" }
+      );
 
     // doc.fontSize(12).fillColor("#333333").text("MicroMerce Corp.", 150-20, 50);
     // doc.fontSize(10)
@@ -717,19 +739,31 @@ doc
     // ===== Items Table =====
     // const tableTop = 280 + 30;
     const tableTop = 250;
-    doc.moveTo(50, tableTop - 5).lineTo(550, tableTop - 5).strokeColor("#aaaaaa").stroke();
+    doc
+      .moveTo(50, tableTop - 5)
+      .lineTo(550, tableTop - 5)
+      .strokeColor("#aaaaaa")
+      .stroke();
 
     doc.font("Helvetica-Bold");
     doc.text("Item", 50, tableTop);
     doc.text("Qty", 320, tableTop);
     doc.text("Price", 370, tableTop);
     doc.text("Total", 470, tableTop, { align: "right" });
-    doc.moveTo(50, tableTop + 15).lineTo(550, tableTop + 15).strokeColor("#eeeeee").stroke();
+    doc
+      .moveTo(50, tableTop + 15)
+      .lineTo(550, tableTop + 15)
+      .strokeColor("#eeeeee")
+      .stroke();
 
     let itemsY = tableTop + 25;
     order.items.forEach((it, idx) => {
       if (idx % 2 === 0) {
-        doc.rect(50, itemsY - 6, 500, 22).fillOpacity(0.03).fill("#000").fillOpacity(1);
+        doc
+          .rect(50, itemsY - 6, 500, 22)
+          .fillOpacity(0.03)
+          .fill("#000")
+          .fillOpacity(1);
       }
       const lineTotal = it.price * it.quantity;
       doc.fillColor("#000").font("Helvetica");
@@ -742,15 +776,23 @@ doc
 
     // ===== Totals =====
     const totalsY = itemsY + 10;
-    doc.moveTo(50, totalsY).lineTo(550, totalsY).strokeColor("#dddddd").stroke();
+    doc
+      .moveTo(50, totalsY)
+      .lineTo(550, totalsY)
+      .strokeColor("#dddddd")
+      .stroke();
 
     doc.font("Helvetica-Bold");
     doc.text("Subtotal", 370, totalsY + 15);
-    doc.text(formatMoney(order.subtotal), 470, totalsY + 15, { align: "right" });
+    doc.text(formatMoney(order.subtotal), 470, totalsY + 15, {
+      align: "right",
+    });
 
     doc.font("Helvetica");
     doc.text("Shipping", 370, totalsY + 35);
-    doc.text(formatMoney(order.shippingFee), 470, totalsY + 35, { align: "right" });
+    doc.text(formatMoney(order.shippingFee), 470, totalsY + 35, {
+      align: "right",
+    });
 
     doc.font("Helvetica-Bold");
     doc.text("Total", 370, totalsY + 55);
@@ -969,18 +1011,48 @@ async function registerEvents() {
   }
 }
 
+
+
+async function subscriptionHandler(broker) {
+  // Subscribe to payment events
+  broker.subscribe("payment.success", async (data) => {
+    console.log("💰 Payment success for order:", data.orderId);
+    // update order status in DB, etc.
+    // Update OrderStatus(data.orderId)
+  });
+
+  broker.subscribe("payment.failed", async (data) => {
+    console.log("❌ Payment failed for order:", data.orderId);
+    // Update OrderStatus(data.orderId)
+  });
+}
+
 async function startServer() {
   await connectDB();
   await sequelize.sync(); // ensures table creation
   app.listen(PORT, async () => {
     console.log(`🛒 Order Service running on port ${PORT}`);
-    // await registerService(SERVICE_NAME, PORT);
+    await registerService(SERVICE_NAME, PORT);
     // registerEvents();
     // startSubscriber();
-    await registerService().then(justConnectNATS);
-    await new Promise(r => setTimeout(r, 500)); // small delay helps stabilize connection
-    await drainOutbox();
-    await setupEventSubscriptions();
+
+
+    // await registerService().then(justConnectNATS);
+    // await new Promise((r) => setTimeout(r, 500)); // small delay helps stabilize connection
+    // await drainOutbox();
+    // await setupEventSubscriptions();
+
+    //  custom package flow
+    // (async () => {
+    //   const broker = await initBroker({ serviceName: 'order-service', stream:
+    //   'ECOM_EVENTS' });
+    //   await broker.subscribe('payment.success', async (data) => { /* ... */ });
+    //   await broker.emit('order.created', { orderId: 123 });
+    //   })();
+
+    broker = await initBroker({ serviceName: SERVICE_NAME, stream: JS_STREAM });
+    await new Promise((r) => setTimeout(r, 500)); // small delay helps stabilize connection
+    await subscriptionHandler(broker);
   });
 }
 

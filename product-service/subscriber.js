@@ -107,7 +107,7 @@ async function setupEventSubscriptions() {
     async (data) => {
       console.log(`✅ Payment successful for Order ${data.orderId}`);
 console.log("Data::::::::::::::::::::::::::::::", data, data.toJSON());
-
+return;
       try {
         const updatedProducts = [];
 
