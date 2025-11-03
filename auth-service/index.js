@@ -3,21 +3,23 @@ const express = require("express");
 const mongoose = require("mongoose");
 const jwt = require("jsonwebtoken");
 const bcrypt = require("bcryptjs");
-// const registerService = require("./serviceRegistry/registerService");
+const registerService = require("./serviceRegistry/registerService");
 const User = require("./models/User");
-const { registerService, justConnectNATS } = require("./subscriber");
-const { drainOutbox, emit } = require("./utils/eventEmitter");
+
+const { initBroker } = require("@milan-dani/message-broker");
 
 const app = express();
 app.use(express.json());
+let broker;
 
 const PORT = process.env.PORT || 3001;
 const SERVICE_NAME = process.env.SERVICE_NAME || "auth";
+const JS_STREAM = process.env.JS_STREAM || "ECOM_EVENTS";
 const JWT_SECRET = process.env.JWT_SECRET || "changeme";
 const MONGO_URI = process.env.MONGO_URI || "mongodb://localhost:27017/auth";
 
-// Dynamic registration
-registerService(SERVICE_NAME, PORT);
+// // Dynamic registration
+// registerService(SERVICE_NAME, PORT);
 
 // Signup
 app.post("/signup", async (req, res) => {
@@ -37,16 +39,14 @@ app.post("/signup", async (req, res) => {
       expiresIn: "12h",
     });
     // Emit Event To NATS
-    await emit("user.created", {
+    await broker.emit("user.created", {
       userId: user._id,
     });
-    res
-      .status(201)
-      .json({
-        message: "User created",
-        user: { firstName, lastName, username, email, role },
-        token,
-      });
+    res.status(201).json({
+      message: "User created",
+      user: { firstName, lastName, username, email, role },
+      token,
+    });
   } catch (err) {
     res.status(400).json({ error: err.message });
   }
@@ -93,9 +93,17 @@ mongoose
   .then(() => {
     app.listen(PORT, async () => {
       console.log(`Auth Service running on port ${PORT}`);
-      await registerService().then(justConnectNATS);
+      // await registerService().then(justConnectNATS);
+      // await new Promise((r) => setTimeout(r, 500)); // small delay helps stabilize connection
+      // await drainOutbox();
+      // custom package flow
+      await registerService(SERVICE_NAME, PORT);
+
+      broker = await initBroker({
+        serviceName: SERVICE_NAME,
+        stream: JS_STREAM,
+      });
       await new Promise((r) => setTimeout(r, 500)); // small delay helps stabilize connection
-      await drainOutbox();
     });
   })
   .catch((err) => console.error("MongoDB connection error:", err));

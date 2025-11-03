@@ -3,23 +3,13 @@ const express = require("express");
 const PDFDocument = require("pdfkit");
 const fs = require("fs");
 const path = require("path");
-// const bodyParser = require("body-parser");
 const { connectDB, sequelize } = require("./db/sequelize");
-// const registerService = require("./serviceRegistry/registerService");
+const registerService = require("./serviceRegistry/registerService");
 const { get, post } = require("./serviceRegistry/serviceClient");
 const { authenticate, requireAdmin } = require("./middleware/authMiddleware");
 const Order = require("./models/Order");
 const OrderSequence = require("./models/OrderSequence");
-const { startSubscriber } = require("./nats/orderSubscriber");
 const { Op, Sequelize } = require("sequelize");
-const {
-  registerService,
-  startListening,
-  justConnectNATS,
-  setupEventSubscriptions,
-} = require("./subscriber");
-const { connectNats } = require("./utils/natsClient");
-// const { drainOutbox, emit } = require("./utils/eventEmitter");
 
 const { initBroker } = require("@milan-dani/message-broker");
 
@@ -867,7 +857,7 @@ app.patch(
     // ^ commenting decrement logic, because now it's been handled via NATS message broker.
 
     // Emit event to NATS
-    await emit("order.status.updated", {
+    await broker.emit("order.status.updated", {
       orderId,
       status,
     });
@@ -1012,20 +1002,84 @@ async function registerEvents() {
 }
 
 
-
+// Function to receive and process payment-related events
 async function subscriptionHandler(broker) {
   // Subscribe to payment events
   broker.subscribe("payment.success", async (data) => {
-    console.log("💰 Payment success for order:", data.orderId);
-    // update order status in DB, etc.
-    // Update OrderStatus(data.orderId)
-  });
+    console.log(`✅ Payment successful for Order ${data.orderId}`);
 
-  broker.subscribe("payment.failed", async (data) => {
-    console.log("❌ Payment failed for order:", data.orderId);
-    // Update OrderStatus(data.orderId)
-  });
+    try {
+      const order = await Order.findByPk(data.orderId);
+
+      if (!order) {
+        console.warn(`⚠️ Order ${data.orderId} not found`);
+        return;
+      }
+
+      if (order.status === "paid") {
+        console.log(`ℹ️ Order ${data.orderId} already marked as paid`);
+      } else {
+        order.status = "paid";
+        order.paymentInfo = {
+          ...order.paymentInfo,
+          status: "paid",
+          transactionId: data.transactionId || null,
+        };
+        await order.save();
+        console.log(`💾 Updated Order ${data.orderId} to 'paid'`);
+      }
+    } catch (err) {
+      console.error(`❌ Failed to update payment status for ${data.orderId}:`, err);
+    }
+
+    // Emit event for other services to handle
+    await broker.emit("order.paid", {
+      orderId: data.orderId,
+      transactionId: data.transactionId,
+      timestamp: new Date().toISOString(),
+    });
+  },);
+
+  broker.subscribe("payment.failed", 
+    async (data) => {
+      console.log(`❌ Payment failed for Order ${data.orderId}`);
+
+      try {
+        const order = await Order.findByPk(data.orderId);
+
+        if (!order) {
+          console.warn(`⚠️ Order ${data.orderId} not found`);
+          return;
+        }
+
+        if (order.status === "paid") {
+          console.log(`ℹ️ Order ${data.orderId} already marked as paid. Skipping failure update.`);
+          return;
+        }
+
+        order.status = "failed";
+        order.paymentInfo = {
+          ...order.paymentInfo,
+          status: "failed",
+          reason: data.reason || "Unknown reason",
+        };
+        await order.save();
+
+        console.log(`💾 Updated Order ${data.orderId} to 'failed'`);
+      } catch (err) {
+        console.error(`❌ Failed to update payment failure for ${data.orderId}:`, err);
+      }
+
+      // Emit event for other services
+      await broker.emit("order.status.updated", {
+        orderId: data.orderId,
+        status: "PAYMENT_FAILED",
+        reason: data.reason,
+        timestamp: new Date().toISOString(),
+      });
+    },);
 }
+
 
 async function startServer() {
   await connectDB();
@@ -1043,13 +1097,6 @@ async function startServer() {
     // await setupEventSubscriptions();
 
     //  custom package flow
-    // (async () => {
-    //   const broker = await initBroker({ serviceName: 'order-service', stream:
-    //   'ECOM_EVENTS' });
-    //   await broker.subscribe('payment.success', async (data) => { /* ... */ });
-    //   await broker.emit('order.created', { orderId: 123 });
-    //   })();
-
     broker = await initBroker({ serviceName: SERVICE_NAME, stream: JS_STREAM });
     await new Promise((r) => setTimeout(r, 500)); // small delay helps stabilize connection
     await subscriptionHandler(broker);

@@ -1,5 +1,6 @@
 // controllers/payments.js
-const { emit } = require("../utils/eventEmitter");
+// const { emit } = require("../utils/eventEmitter");
+const { getBroker } = require("../utils/broker");
 const redis = require("../utils/redisClient");
 const uuid = require("uuid").v4;
 const Stripe = require("stripe");
@@ -17,6 +18,8 @@ async function processPaymentHandler(req, res) {
   const key = `idempotency:idempotency:${orderId}${orderId}:${paymentMethodId}:${Date.now()}`; // unique key everytime for testing
   
   console.log("[Stripe] Processing payment for", orderId, "using", paymentMethodId);
+
+  const broker = getBroker(); // getting NATS message broker instance 
 
   try {
     const cached = await redis.get(key);
@@ -42,7 +45,7 @@ async function processPaymentHandler(req, res) {
 
     if (paymentIntent.status === "succeeded") {
       result = { success: true, transactionId, stripeId: paymentIntent.id, status: "paid" };
-      await emit("payment.success", {
+      await broker.emit("payment.success", {
         orderId,
         transactionId,
         stripeId: paymentIntent.id,
@@ -65,7 +68,7 @@ async function processPaymentHandler(req, res) {
         status: paymentIntent.status,
         reason: paymentIntent.last_payment_error?.message || "Payment not completed",
       };
-      await emit("payment.failed", {
+      await broker.emit("payment.failed", {
         orderId,
         transactionId,
         amount,
@@ -91,7 +94,7 @@ async function processPaymentHandler(req, res) {
     };
 
     await redis.set(key, JSON.stringify(failResult), "EX", IDEMPOTENCY_TTL);
-    await emit("payment.failed", {
+    await broker.emit("payment.failed", {
       orderId,
       amount,
       reason,

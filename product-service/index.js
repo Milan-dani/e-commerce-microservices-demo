@@ -6,15 +6,9 @@ const bcrypt = require("bcryptjs");
 const fs = require("fs");
 const path = require("path");
 const upload = require("./middleware/upload");
+const registerService = require("./serviceRegistry/registerService");
 const Product = require("./models/Product");
-// const registerService = require("./serviceRegistry/registerService");
 const { authenticate, requireAdmin } = require("./middleware/authMiddleware");
-const {
-  registerService,
-  justConnectNATS,
-  setupEventSubscriptions,
-} = require("./subscriber");
-const { drainOutbox, emit } = require("./utils/eventEmitter");
 
 const { initBroker } = require("@milan-dani/message-broker");
 
@@ -91,7 +85,7 @@ app.post(
       };
 
       const product = await Product.create(productData);
-      await emit("product.created", {
+      await broker.emit("product.created", {
         productId: product?.id || "",
       });
       res.status(201).json(product);
@@ -416,9 +410,9 @@ app.get("/products/:id", async (req, res) => {
     product.image = getFullImageUrl(req, product.image);
   }
   // emiting event for Recomenation service via NATS
-  // await emit("product.viewed", {
-  //   productId: product.id || req.params.id,
-  // });
+  await broker.emit("product.viewed", {
+    productId: product.id || req.params.id,
+  });
   res.json(product);
 });
 
@@ -486,8 +480,8 @@ app.put(
       });
 
       await product.save();
-      // 
-      await emit("product.updated", {
+      //
+      await broker.emit("product.updated", {
         productId: product.id || req.params.id,
       });
 
@@ -517,7 +511,7 @@ app.delete("/products/:id", authenticate, requireAdmin, async (req, res) => {
 
     // Delete product from database
     await Product.findByIdAndDelete(req.params.id);
-    await emit("product.deleted", {
+    await broker.emit("product.deleted", {
       productId: product.id || req.params.id,
     });
     res.json({ message: "Product deleted successfully" });
@@ -566,10 +560,70 @@ async function subscriptionHandler(broker) {
   // Subscribe to payment events
   broker.subscribe("order.paid", async (data, m) => {
     console.log("💰 Payment success for order:", data.orderId);
-    // update order status in DB, etc.
-    // Update OrderStatus(data.orderId)
+    console.log("📦 Order Data:", data);
+    try {
+      const updatedProducts = [];
+
+      // Validate order items
+      if (!Array.isArray(data.items) || data.items.length === 0) {
+        console.warn(`⚠️ No items found for Order ${data.orderId}`);
+        return;
+      }
+
+      // Loop through each ordered item
+      for (const item of data.items) {
+        const { productId, quantity } = item;
+
+        if (!productId || !quantity) {
+          console.warn(`⚠️ Invalid item data in Order ${data.orderId}:`, item);
+          continue;
+        }
+
+        // Atomically decrement product quantity if enough stock
+        const product = await Product.findOneAndUpdate(
+          { _id: productId, quantity: { $gte: quantity } },
+          { $inc: { quantity: -quantity } },
+          { new: true }
+        );
+
+        if (!product) {
+          console.warn(
+            `⚠️ Product ${productId} not found or insufficient stock for Order ${data.orderId}`
+          );
+          continue;
+        }
+
+        updatedProducts.push({
+          productId,
+          remainingQuantity: product.quantity,
+          decrementedBy: quantity,
+        });
+      }
+
+      // Emit event if any stock was updated
+      if (updatedProducts.length > 0) {
+        console.log(
+          `✅ Updated stock for ${updatedProducts.length} products (Order ${data.orderId})`
+        );
+
+        await broker.emit("product.decremented", {
+          orderId: data.orderId,
+          updatedProducts,
+          timestamp: new Date().toISOString(),
+        });
+      } else {
+        console.log(`ℹ️ No stock changes made for Order ${data.orderId}`);
+      }
+    } catch (err) {
+      console.error(
+        `❌ Failed to update product quantities for Order ${data.orderId}:`,
+        err
+      );
+    }
+
   });
 }
+
 
 mongoose
   .connect(MONGO_URI)
@@ -580,12 +634,14 @@ mongoose
       // await new Promise((r) => setTimeout(r, 500)); // small delay helps stabilize connection
       // await drainOutbox();
       // await setupEventSubscriptions();
-      await registerService();
+      await registerService(SERVICE_NAME, PORT);
 
-      let broker = await initBroker({ serviceName: SERVICE_NAME, stream: JS_STREAM });
-    await new Promise((r) => setTimeout(r, 500)); // small delay helps stabilize connection
-    await subscriptionHandler(broker);
-
+      let broker = await initBroker({
+        serviceName: SERVICE_NAME,
+        stream: JS_STREAM,
+      });
+      await new Promise((r) => setTimeout(r, 500)); // small delay helps stabilize connection
+      await subscriptionHandler(broker);
     });
   })
   .catch((err) => console.error("MongoDB connection error:", err));

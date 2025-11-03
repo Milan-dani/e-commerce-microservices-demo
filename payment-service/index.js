@@ -1,17 +1,20 @@
 require("dotenv").config();
 const express = require('express');
-// const registerService = require("../cart-service/serviceRegistry/registerService");
+const registerService = require("../serviceRegistry/registerService");
 const { processPaymentHandler, webhookHandler } = require("./controllers/payments");
 const { getNats } = require("./nats/publisher");
 const redis = require("./utils/redisClient");
-const { registerService, justConnectNATS, setupEventSubscriptions } = require("./subscriber");
-const { drainOutbox, emit } = require("./utils/eventEmitter");
+const { initBroker } = require("@milan-dani/message-broker");
+const { setBroker } = require("./utils/broker");
+
 
 const app = express();
 app.use(express.json());
+let broker;
 
 const PORT = process.env.PORT || 3005;
 const SERVICE_NAME = process.env.SERVICE_NAME || "payments";
+const JS_STREAM = process.env.JS_STREAM || "ECOM_EVENTS";
 
 // Dynamic registration
 // registerService(SERVICE_NAME, PORT);
@@ -79,7 +82,9 @@ app.post('/payments/process', (req, res) => {
 
 app.listen(PORT, async() => {
   console.log(`Payment Service running on port ${PORT}`);
-  await registerService().then(justConnectNATS);
-  await drainOutbox();
-  // await setupEventSubscriptions();
+  await registerService(SERVICE_NAME, PORT);
+
+  broker = await initBroker({ serviceName: SERVICE_NAME, stream: JS_STREAM });
+  await new Promise((r) => setTimeout(r, 500)); // small delay helps stabilize connection
+  setBroker(broker);
 });

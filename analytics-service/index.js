@@ -2,18 +2,20 @@ require("dotenv").config();
 const express = require("express");
 const mongoose = require("mongoose");
 const jwt = require("jsonwebtoken");
-// const registerService = require("./serviceRegistry/registerService");
+const registerService = require("./serviceRegistry/registerService");
 const { authenticate, requireAdmin } = require("./middleware/authMiddleware");
-const { registerService, startListening } = require("./subscriber");
 const Event = require("./models/Event");
 const NodeCache = require("node-cache");
+const { initBroker } = require("@milan-dani/message-broker");
 
 const app = express();
 app.use(express.json());
+let broker;
 const cache = new NodeCache({ stdTTL: 30 }); // 30s cache
 
 const PORT = process.env.PORT || 3008;
 const SERVICE_NAME = process.env.SERVICE_NAME || "analytics";
+const JS_STREAM = process.env.JS_STREAM || "ECOM_EVENTS";
 const JWT_SECRET = process.env.JWT_SECRET || "changeme";
 const MONGO_URI =
   process.env.MONGO_URI || "mongodb://localhost:27017/analytics";
@@ -144,12 +146,84 @@ app.get("/health", (req, res) => {
   res.json({ status: "ok" });
 });
 
+async function subscriptionHandler_ForAllTopics(broker) {
+  // Subscribe to ALL events from the stream
+  broker.subscribe(
+    ">",
+    async (data, subject) => {
+      console.log(`📩 Event received: ${subject}`);
+      try {
+        await Event.create({
+          event: subject,
+          source: data.source || "unknown",
+          payload: data,
+          timestamp: data.timestamp ? new Date(data.timestamp) : new Date(),
+        });
+        console.log(`📊 Analytics saved event: ${subject}`);
+      } catch (error) {
+        console.log(`❌ Analytics couldn't save event: ${subject}`);
+      }
+    }
+    // { ack: false, jetstream: false} // ✅ no-ack mode required
+  );
+}
+
+const DEFAULT_TOPICS = [
+  "user.created",
+  "order.paid",
+  "order.status.updated",
+  "payment.success",
+  "payment.failed",
+  "product.created",
+  "product.viewed",
+  "product.updated",
+  "product.deleted",
+  "product.decremented"
+];
+
+const TOPICS = process.env.TOPICS
+  ? [...process.env.TOPICS.split(",")]
+  : [...DEFAULT_TOPICS];
+// : ["product.*","order.*", "payment.*", "user.*"];
+async function subscriptionHandler_ForSelectedTopics(broker) {
+  // Subscribe only to given topics
+  for (const topic of TOPICS) {
+    broker.subscribe(
+      topic,
+      async (data, subject) => {
+        console.log(`📩 Event received: ${subject}`);
+        try {
+          await Event.create({
+            event: topic,
+            source: data.source || "unknown",
+            payload: data,
+            timestamp: data.timestamp ? new Date(data.timestamp) : new Date(),
+          });
+          console.log(`📊 Analytics saved event: ${topic}`);
+        } catch (error) {
+          console.log(`❌ Analytics couldn't save event: ${topic}`);
+        }
+      }
+      // { ack: false, jetstream: false }
+    ); // ✅ no-ack mode required
+  }
+}
+
 mongoose
   .connect(MONGO_URI)
   .then(() => {
     app.listen(PORT, async () => {
       console.log(`Analytics Service running on port ${PORT}`);
-      await registerService().then(startListening);
+      await registerService(SERVICE_NAME, PORT);
+
+      broker = await initBroker({
+        serviceName: SERVICE_NAME,
+        stream: JS_STREAM,
+      });
+      await new Promise((r) => setTimeout(r, 500)); // small delay helps stabilize connection
+      // await subscriptionHandler(broker);
+      // await subscriptionHandler_ForAllTopics(broker);
+      await subscriptionHandler_ForSelectedTopics(broker);
     });
   })
   .catch((err) => console.error("MongoDB connection error:", err));

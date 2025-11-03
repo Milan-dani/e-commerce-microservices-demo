@@ -3,7 +3,7 @@ import { logout } from "@/store/slices/authSlice";
 import { createApi, fetchBaseQuery } from "@reduxjs/toolkit/query/react";
 import toast from "react-hot-toast";
 
-const baseUrl = "/api"; // Nginx will forward to api-gateway
+const baseUrl = process.env.NEXT_PUBLIC_API_URL || "/api"; // Nginx will forward to api-gateway
 // const baseUrl = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8080";
 // const baseUrl = process.env.NEXT_PUBLIC_API_URL || "http://localhost:3030";
 

@@ -15,8 +15,8 @@ const SERVICE_NAME = process.env.SERVICE_NAME || "cart";
 const JWT_SECRET = process.env.JWT_SECRET || "changeme";
 const MONGO_URI = process.env.MONGO_URI || "mongodb://localhost:27017/cart";
 
-// Dynamic registration
-registerService(SERVICE_NAME, PORT);
+// // Dynamic registration
+// registerService(SERVICE_NAME, PORT);
 
 // Add item to cart
 app.post("/add", authenticate, async (req, res) => {
@@ -110,6 +110,7 @@ mongoose
   .then(() => {
     app.listen(PORT, () => {
       console.log(`Cart Service running on port ${PORT}`);
+      registerService(SERVICE_NAME, PORT);
     });
   })
   .catch((err) => console.error("MongoDB connection error:", err));
