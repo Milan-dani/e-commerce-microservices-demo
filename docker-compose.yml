@@ -1,5 +1,5 @@
 # Docker Compose for E-Commerce Microservices Demo
-version: "3.9"
+# version: "3.9"
 
 services:
   # ------------------------------
@@ -22,6 +22,7 @@ services:
     environment:
       PORT: 8500
       NATS_URL: nats://nats:4222
+      JS_STREAM: ECOM_EVENTS
       REDIS_URL: redis://redis:6379
     networks:
       - app-network
@@ -36,6 +37,7 @@ services:
       SERVICE_NAME: message-broker
       CONSUL_URL: http://local-consul:8500
       NATS_URL: nats://nats:4222
+      JS_STREAM: ECOM_EVENTS
       REDIS_URL: redis://redis:6379
     depends_on:
       - local-consul
@@ -136,6 +138,7 @@ services:
       CONSUL_URL: http://local-consul:8500
       MESSAGE_BROKER_URL: http://message-broker:3009
       NATS_URL: nats://nats:4222
+      JS_STREAM: ECOM_EVENTS
     depends_on:
       - message-broker
       - api-gateway
@@ -161,6 +164,7 @@ services:
       MESSAGE_BROKER_URL: http://message-broker:3009
       CONSUL_URL: http://local-consul:8500
       NATS_URL: nats://nats:4222
+      JS_STREAM: ECOM_EVENTS
     depends_on:
       - message-broker
       - api-gateway
@@ -188,6 +192,7 @@ services:
       REDIS_URL: redis://redis:6379
       CONSUL_URL: http://local-consul:8500
       NATS_URL: nats://nats:4222
+      JS_STREAM: ECOM_EVENTS
     depends_on:
       - message-broker
       - api-gateway
@@ -216,6 +221,7 @@ services:
       # POSTGRES_URL: postgres://postgres:password@postgres:5432/orderdb
       CONSUL_URL: http://local-consul:8500
       NATS_URL: nats://nats:4222
+      JS_STREAM: ECOM_EVENTS
       MESSAGE_BROKER_URL: http://message-broker:3009
     depends_on:
       - message-broker
@@ -243,6 +249,7 @@ services:
       CONSUL_URL: http://local-consul:8500
       MESSAGE_BROKER_URL: http://message-broker:3009
       NATS_URL: nats://nats:4222
+      JS_STREAM: ECOM_EVENTS
       REDIS_URL: redis://redis:6379
     env_file:
       - .env
@@ -273,6 +280,7 @@ services:
       MONGO_URI: mongodb://mongo:27017/recommendation
       CONSUL_URL: http://local-consul:8500
       NATS_URL: nats://nats:4222
+      JS_STREAM: ECOM_EVENTS
     depends_on:
       - message-broker
       - api-gateway
@@ -295,7 +303,8 @@ services:
       MONGO_URI: mongodb://mongo:27017/analytics   # Use 'mongo' as hostname, not localhost
       CONSUL_URL: http://local-consul:8500          # Use 'local-consul' as hostname
       MESSAGE_BROKER_URL: http://message-broker:3009         # Use 'message-broker' as hostname
-      NATS_URL: nats://nats:4222         # Use NATS service in network
+      NATS_URL: nats://nats:4222     
+      JS_STREAM: ECOM_EVENTS    # Use NATS service in network
       SERVICE_NAME: analytics
     depends_on:
       - message-broker
@@ -319,7 +328,8 @@ services:
       # - "3000:3000"
     environment:
       PORT: 3000
-      NEXT_PUBLIC_API_URL: http://api-gateway:8080
+      # NEXT_PUBLIC_API_URL: http://api-gateway:8080
+      NEXT_PUBLIC_API_URL: /api
       NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY: ${NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY} 
     env_file:
       - .env
