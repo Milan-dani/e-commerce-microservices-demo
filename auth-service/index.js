@@ -67,6 +67,10 @@ app.post("/login", async (req, res) => {
   const token = jwt.sign({ id: user._id, role: user.role }, JWT_SECRET, {
     expiresIn: "12h",
   });
+  // Emit Event To NATS
+  await broker.emit("user.loggedin", {
+    userId: user._id,
+  });
   // Convert to plain JS object and remove password
   const { password: _, ...userWithoutPassword } = user.toObject();
   res.json({ message: "Login Successful", user: userWithoutPassword, token });

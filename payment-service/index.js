@@ -1,6 +1,6 @@
 require("dotenv").config();
 const express = require('express');
-const registerService = require("../serviceRegistry/registerService");
+const registerService = require("./serviceRegistry/registerService");
 const { processPaymentHandler, webhookHandler } = require("./controllers/payments");
 const { getNats } = require("./nats/publisher");
 const redis = require("./utils/redisClient");

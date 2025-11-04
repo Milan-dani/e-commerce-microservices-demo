@@ -8,7 +8,7 @@
     "dev": "nodemon index.js"
   },
   "dependencies": {
-    "@milan-dani/message-broker": "^0.1.2",
+    "@milan-dani/message-broker": "^0.1.3",
     "dotenv": "^17.2.3",
     "express": "^5.1.0",
     "http": "^0.0.1-security",

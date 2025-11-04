@@ -19,6 +19,8 @@ const eventSchema = new mongoose.Schema({
   userId: { type: String, index: true },
   timestamp: { type: Date, default: Date.now, index: true },
   day: { type: String, index: true }, // YYYY-MM-DD for daily grouping
+},{
+  timestamps: true // createdAt/updatedAt for convenience
 });
 
 eventSchema.pre("save", function (next) {

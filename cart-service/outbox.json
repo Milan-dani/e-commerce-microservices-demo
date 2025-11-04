@@ -1,0 +1,12 @@
+[
+  {
+    "subject": "cart.item.removed",
+    "payload": {
+      "cartId": "68e91e5869381e061b69212a",
+      "userId": "68e8f01d24ae56d58f8017e9",
+      "productId": "68ecf2a93c1524f6caea0f36",
+      "timestamp": "2025-11-04T08:55:13.135Z",
+      "source": "cart"
+    }
+  }
+]

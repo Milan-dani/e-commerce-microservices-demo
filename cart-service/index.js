@@ -6,12 +6,15 @@ const registerService = require("./serviceRegistry/registerService");
 const { get } = require("./serviceRegistry/serviceClient");
 const { authenticate } = require("./middleware/authMiddleware");
 const Cart = require("./models/Cart");
+const { initBroker } = require("@milan-dani/message-broker");
 
 const app = express();
 app.use(express.json());
+let broker;
 
 const PORT = process.env.PORT || 3003;
 const SERVICE_NAME = process.env.SERVICE_NAME || "cart";
+const JS_STREAM = process.env.JS_STREAM || "ECOM_EVENTS";
 const JWT_SECRET = process.env.JWT_SECRET || "changeme";
 const MONGO_URI = process.env.MONGO_URI || "mongodb://localhost:27017/cart";
 
@@ -40,6 +43,13 @@ app.post("/add", authenticate, async (req, res) => {
     }
 
     await cart.save();
+    await broker.emit("cart.item.added", {
+      cartId: cart?.id || "",
+      userId: userId,
+      productId: product?._id || "",
+      quantity: quantity,
+    });
+ 
     res.json(cart);
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -61,6 +71,12 @@ app.post("/update", authenticate, async (req, res) => {
 
     cart.items[itemIndex].quantity = quantity;
     await cart.save();
+    await broker.emit("cart.item.updated", {
+      cartId: cart?.id || "",
+      userId: userId,
+      productId: productId,
+      quantity: quantity,
+    });
     res.json(cart);
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -78,6 +94,11 @@ app.post("/remove", authenticate, async (req, res) => {
 
     cart.items = cart.items.filter((i) => i.productId !== productId);
     await cart.save();
+    await broker.emit("cart.item.removed", {
+      cartId: cart?.id || "",
+      userId: userId,
+      productId: productId,
+    });
     res.json(cart);
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -108,9 +129,14 @@ app.get("/health", (req, res) => {
 mongoose
   .connect(MONGO_URI)
   .then(() => {
-    app.listen(PORT, () => {
+    app.listen(PORT, async () => {
       console.log(`Cart Service running on port ${PORT}`);
-      registerService(SERVICE_NAME, PORT);
+      await registerService(SERVICE_NAME, PORT);
+      broker = await initBroker({
+        serviceName: SERVICE_NAME,
+        stream: JS_STREAM,
+      });
+      await new Promise((r) => setTimeout(r, 500)); // small delay helps stabilize connection
     });
   })
   .catch((err) => console.error("MongoDB connection error:", err));

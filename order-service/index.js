@@ -105,8 +105,14 @@ app.post("/checkout/create", authenticate, async (req, res) => {
   //   userId,
   //   total,
   // });
-  await broker.emit("order.paid", {
+  await broker.emit("order.created", {
     orderId: order.id,
+    userId,
+    total,
+    items: validatedItems,
+    shippingFee,
+    subtotal,
+    orderNumber,
   });
 
   res.json(order);
@@ -278,13 +284,13 @@ app.post("/checkout/:orderId/place", authenticate, async (req, res) => {
       //   items: order.items,
       // });
       // Emit an event without manually connecting every time
-  await broker.emit("order.paid", {
-      orderId: order.id,
-      userId,
-      transactionId: paymentResult.transactionId,
-      amount: order.total,
-      items: order.items,
-    });
+  // await broker.emit("order.paid", {
+  //     orderId: order.id,
+  //     userId,
+  //     transactionId: paymentResult.transactionId,
+  //     amount: order.total,
+  //     items: order.items,
+  //   });
 
       return res.json({ success: true, order });
     }
@@ -1028,16 +1034,17 @@ async function subscriptionHandler(broker) {
         await order.save();
         console.log(`💾 Updated Order ${data.orderId} to 'paid'`);
       }
-    } catch (err) {
-      console.error(`❌ Failed to update payment status for ${data.orderId}:`, err);
-    }
-
-    // Emit event for other services to handle
+         // Emit event for other services to handle
     await broker.emit("order.paid", {
       orderId: data.orderId,
       transactionId: data.transactionId,
       timestamp: new Date().toISOString(),
     });
+    } catch (err) {
+      console.error(`❌ Failed to update payment status for ${data.orderId}:`, err);
+    }
+
+ 
   },);
 
   broker.subscribe("payment.failed", 

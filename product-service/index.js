@@ -14,6 +14,7 @@ const { initBroker } = require("@milan-dani/message-broker");
 
 const app = express();
 app.use(express.json());
+let broker;
 
 // app.use('/uploads', express.static('uploads'));
 // Serve static uploads folder so frontend can access images
@@ -411,7 +412,7 @@ app.get("/products/:id", async (req, res) => {
   }
   // emiting event for Recomenation service via NATS
   await broker.emit("product.viewed", {
-    productId: product.id || req.params.id,
+    productId: product._id || req.params.id,
   });
   res.json(product);
 });
@@ -620,10 +621,8 @@ async function subscriptionHandler(broker) {
         err
       );
     }
-
   });
 }
-
 
 mongoose
   .connect(MONGO_URI)
@@ -636,7 +635,7 @@ mongoose
       // await setupEventSubscriptions();
       await registerService(SERVICE_NAME, PORT);
 
-      let broker = await initBroker({
+      broker = await initBroker({
         serviceName: SERVICE_NAME,
         stream: JS_STREAM,
       });
