@@ -16,11 +16,11 @@ yarn-error.log*
 Thumbs.db
 
 # Env files
-.env
-.env.local
-.env.development.local
-.env.test.local
-.env.production.local
+.env.*
+# .env.local
+# .env.development.local
+# .env.test.local
+# .env.production.local
 # Don't ignore Env example
 !.env.example
 
@@ -66,3 +66,7 @@ uploads/
 
 # ignore backup zips
 *.zip
+
+# ignore outbox.json
+**/outbox.json
+

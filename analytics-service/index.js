@@ -104,7 +104,64 @@ const TOPICS = process.env.TOPICS
   ? [...process.env.TOPICS.split(",")]
   : [...DEFAULT_TOPICS];
 // : ["product.*","order.*", "payment.*", "user.*"];
+// ✅ Retry helper for each subscription
+async function safeSubscribe(broker, subject, handler, retries = 5, delay = 500) {
+  const start = Date.now();
+  for (let i = 0; i < retries; i++) {
+    try {
+      await broker.subscribe(subject, handler, { ack: true, jetstream: true });
+      const time = ((Date.now() - start) / 1000).toFixed(2);
+      console.log(`✅ [${subject}] Subscribed successfully after ${time}s`);
+      return; // success
+    } catch (err) {
+      console.warn(
+        `⚠️ [${subject}] Subscribe attempt ${i + 1}/${retries} failed: ${err.message}`
+      );
+      await new Promise((r) => setTimeout(r, delay));
+    }
+  }
+  const totalTime = ((Date.now() - start) / 1000).toFixed(2);
+  console.error(`❌ [${subject}] Failed to subscribe after ${retries} retries (${totalTime}s total)`);
+  // console.error(`❌ [${subject}] Failed to subscribe after ${retries} retries`);
+}
+
+// ✅ Sequential subscription handler with small delay between each
 async function subscriptionHandler_ForSelectedTopics(broker) {
+  console.log(`🚀 Starting sequential subscription setup for ${TOPICS.length} topics...`);
+  const overallStart = Date.now();
+  for (const topic of TOPICS) {
+    const topicStart = Date.now();
+    await safeSubscribe(
+      broker,
+      topic,
+      async (data, subject) => {
+        console.log(`📩 Event received: ${subject}`);
+
+        try {
+          await Event.create({
+            event: topic,
+            source: data.source || "unknown",
+            payload: data,
+            timestamp: data.timestamp ? new Date(data.timestamp) : new Date(),
+          });
+          console.log(`📊 Analytics saved event: ${topic}`);
+        } catch (error) {
+          console.error(`❌ Analytics couldn't save event: ${topic}`, error);
+        }
+      },
+      5, // max retries
+      500 // delay between retries
+    );
+    const topicTime = ((Date.now() - topicStart) / 1000).toFixed(2);
+    console.log(`⏱️ Finished setup for [${topic}] in ${topicTime}s`);
+    // ✅ small delay between successful subscriptions
+    await new Promise((r) => setTimeout(r, 150));
+  }
+  const totalTime = ((Date.now() - overallStart) / 1000).toFixed(2);
+  console.log(`✅ All ${TOPICS.length} subscriptions initialized in ${totalTime}s`);
+}
+
+async function subscriptionHandler_ForSelectedTopics_OLD(broker) {
   // Subscribe only to given topics
   for (const topic of TOPICS) {
     broker.subscribe(
@@ -139,9 +196,15 @@ mongoose
         serviceName: SERVICE_NAME,
         stream: JS_STREAM,
       });
-      await new Promise((r) => setTimeout(r, 500)); // small delay helps stabilize connection
-      // await subscriptionHandler(broker);
-      // await subscriptionHandler_ForAllTopics(broker);
+      // await new Promise((r) => setTimeout(r, 500)); // small delay helps stabilize connection
+      // // await subscriptionHandler(broker);
+      // // await subscriptionHandler_ForAllTopics(broker);
+      // await subscriptionHandler_ForSelectedTopics(broker);
+
+      // small startup delay to let JetStream stabilize (optional but safe)
+      await new Promise((r) => setTimeout(r, 1000));
+
+      // ✅ sequential + retry logic here
       await subscriptionHandler_ForSelectedTopics(broker);
     });
   })

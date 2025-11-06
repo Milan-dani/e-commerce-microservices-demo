@@ -1087,6 +1087,19 @@ async function subscriptionHandler(broker) {
     },);
 }
 
+async function safeSubscribe(handler, broker, retries = 5) {
+  for (let i = 0; i < retries; i++) {
+    try {
+      await handler(broker);
+      console.log("✅ Subscriptions initialized successfully");
+      return;
+    } catch (err) {
+      console.warn(`⚠️ Subscription init failed (try ${i + 1}/${retries}):`, err.message);
+      await new Promise(r => setTimeout(r, 1000));
+    }
+  }
+  throw new Error("Failed to initialize subscriptions after multiple retries");
+}
 
 async function startServer() {
   await connectDB();
@@ -1106,7 +1119,9 @@ async function startServer() {
     //  custom package flow
     broker = await initBroker({ serviceName: SERVICE_NAME, stream: JS_STREAM });
     await new Promise((r) => setTimeout(r, 500)); // small delay helps stabilize connection
-    await subscriptionHandler(broker);
+    await safeSubscribe(subscriptionHandler, broker);
+
+    // await subscriptionHandler(broker);
   });
 }
 
